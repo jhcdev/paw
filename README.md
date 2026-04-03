@@ -160,7 +160,6 @@ Hardware: 16GB RAM minimum, GPU recommended.
 
 ### Coming Soon
 
-- **Anthropic** — Claude models via [jhcdev/cats-claw-anthropic](https://github.com/jhcdev/cats-claw-anthropic) plugin
 - **Gemini** — Google Gemini API
 - **Groq** — Fast inference
 - **OpenRouter** — Multi-model hub
