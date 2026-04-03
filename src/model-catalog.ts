@@ -36,25 +36,6 @@ const CATALOG: Record<ProviderName, ModelInfo[]> = {
     { id: "claude-3-5-haiku-20241022", name: "Haiku 3.5", tier: "fast", minPlan: "api" },
     { id: "claude-3-5-sonnet-20241022", name: "Sonnet 3.5 v2", tier: "standard", minPlan: "api" },
   ],
-  openai: [
-    // Free
-    { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "fast", minPlan: "free" },
-    { id: "gpt-4o", name: "GPT-4o", tier: "standard", minPlan: "free" },
-    // Plus ($20/mo)
-    { id: "gpt-5-nano", name: "GPT-5 Nano", tier: "fast", minPlan: "pro" },
-    { id: "gpt-5-mini", name: "GPT-5 Mini", tier: "standard", minPlan: "pro" },
-    { id: "o4-mini", name: "o4 Mini", tier: "standard", minPlan: "pro" },
-    { id: "gpt-5.2", name: "GPT-5.2", tier: "strong", minPlan: "pro" },
-    // Pro ($200/mo) — highest consumer tier, all models
-    { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", tier: "strong", minPlan: "pro" },
-    { id: "o3", name: "o3", tier: "strong", minPlan: "pro" },
-    { id: "o3-pro", name: "o3 Pro", tier: "strong", minPlan: "pro" },
-    { id: "deep-research", name: "Deep Research", tier: "strong", minPlan: "pro" },
-    // API only
-    { id: "gpt-4.1", name: "GPT-4.1", tier: "standard", minPlan: "api" },
-    { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", tier: "fast", minPlan: "api" },
-    { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", tier: "fast", minPlan: "api" },
-  ],
   gemini: [
     { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", tier: "fast", minPlan: "free" },
     { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", tier: "fast", minPlan: "free" },
@@ -74,6 +55,18 @@ const CATALOG: Record<ProviderName, ModelInfo[]> = {
     { id: "openai/gpt-5-mini", name: "GPT-5 Mini", tier: "standard", minPlan: "free" },
     { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)", tier: "standard", minPlan: "free" },
     { id: "openai/gpt-5.2", name: "GPT-5.2", tier: "strong", minPlan: "free" },
+  ],
+  codex: [
+    { id: "gpt-5.4", name: "GPT-5.4 (default)", tier: "strong", minPlan: "free" },
+    { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", tier: "standard", minPlan: "free" },
+    { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", tier: "strong", minPlan: "free" },
+    { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark (ultra-fast)", tier: "fast", minPlan: "free" },
+    { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", tier: "strong", minPlan: "free" },
+    { id: "gpt-5.2", name: "GPT-5.2", tier: "strong", minPlan: "free" },
+    { id: "gpt-5.1-codex-max", name: "GPT-5.1 Codex Max", tier: "strong", minPlan: "pro" },
+    { id: "gpt-5.1-codex-mini", name: "GPT-5.1 Codex Mini", tier: "fast", minPlan: "free" },
+    { id: "o4-mini", name: "o4 Mini", tier: "standard", minPlan: "free" },
+    { id: "o3", name: "o3", tier: "strong", minPlan: "pro" },
   ],
   ollama: [
     { id: "qwen3", name: "Qwen3 8B", tier: "standard", minPlan: "free" },
@@ -109,30 +102,6 @@ async function detectAnthropicPlan(): Promise<PlanLevel> {
     return "api"; // No subscription = API key user, all models available
   } catch {
     return "api"; // Can't read = assume API key
-  }
-}
-
-/** Detect OpenAI plan from ~/.codex/auth.json JWT */
-async function detectOpenAIPlan(): Promise<PlanLevel> {
-  try {
-    const raw = await fs.readFile(path.join(os.homedir(), ".codex", "auth.json"), "utf8");
-    const data = JSON.parse(raw);
-    // API key user
-    if (data.OPENAI_API_KEY && typeof data.OPENAI_API_KEY === "string") return "api";
-    // OAuth user — decode JWT to get plan
-    const idToken = data.tokens?.id_token;
-    if (idToken) {
-      const payload = JSON.parse(Buffer.from(idToken.split(".")[1], "base64").toString());
-      const plan = payload["https://api.openai.com/auth"]?.chatgpt_plan_type?.toLowerCase() ?? "";
-      if (plan.includes("enterprise")) return "enterprise";
-      if (plan.includes("team")) return "team";
-      if (plan.includes("max") || plan.includes("pro_plus")) return "max";
-      if (plan.includes("pro") || plan.includes("plus")) return "pro";
-      return "free";
-    }
-    return "api";
-  } catch {
-    return "api";
   }
 }
 
@@ -200,9 +169,6 @@ async function fetchGeminiModels(apiKey: string): Promise<ModelInfo[]> {
 /** Live-detect models for API key providers */
 export async function detectLiveModels(provider: ProviderName, apiKey: string, baseUrl?: string): Promise<ModelInfo[] | null> {
   switch (provider) {
-    case "openai":
-      if (apiKey) return fetchOpenAIModels("https://api.openai.com/v1", apiKey);
-      return null;
     case "gemini":
       if (apiKey) return fetchGeminiModels(apiKey);
       return null;
@@ -223,7 +189,7 @@ export async function detectLiveModels(provider: ProviderName, apiKey: string, b
 export async function detectPlan(provider: ProviderName): Promise<PlanLevel> {
   switch (provider) {
     case "anthropic": return detectAnthropicPlan();
-    case "openai": return detectOpenAIPlan();
+    case "codex": return "api";
     case "gemini":
     case "groq":
     case "openrouter":

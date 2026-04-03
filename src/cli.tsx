@@ -28,7 +28,7 @@ type ChatEntry = {
 
 const PROVIDER_LABELS: Record<ProviderName, string> = {
   anthropic: "Anthropic",
-  openai: "OpenAI",
+  codex: "Codex",
   gemini: "Gemini",
   groq: "Groq",
   openrouter: "OpenRouter",
@@ -58,7 +58,7 @@ function formatTokens(n: number): string {
 
 const ALL_PROVIDERS: { name: ProviderName; label: string; hasLogin: boolean }[] = [
   { name: "anthropic", label: "Anthropic", hasLogin: true },
-  { name: "openai", label: "OpenAI", hasLogin: true },
+  { name: "codex", label: "Codex (CLI)", hasLogin: false },
   { name: "gemini", label: "Gemini", hasLogin: false },
   { name: "groq", label: "Groq", hasLogin: false },
   { name: "openrouter", label: "OpenRouter", hasLogin: false },
@@ -224,15 +224,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                   setEntries((c) => [...c, { role: "system", text: auth?.expired ? "Claude login expired. Run 'claude' to refresh." : "No Claude login found. Use API key." }]);
                 }
               }).catch(() => setEntries((c) => [...c, { role: "system", text: "Failed to read Claude login." }]));
-            } else if (prov === "openai") {
-              import("./codex-auth.js").then(({ readCodexAuth }) => readCodexAuth()).then((auth) => {
-                if (auth) {
-                  agent.getMulti().register("openai", auth.accessToken, "gpt-5-mini");
-                  setEntries((c) => [...c, { role: "system", text: `OpenAI connected via Codex (${auth.authMode})` }]);
-                } else {
-                  setEntries((c) => [...c, { role: "system", text: "No Codex login found. Use API key." }]);
-                }
-              }).catch(() => setEntries((c) => [...c, { role: "system", text: "Failed to read Codex login." }]));
             }
           }
           return;
@@ -407,7 +398,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           creds[settingsProvider] = { apiKey: line.trim() };
           await fsp.mkdir(p.dirname(credPath), { recursive: true });
           await fsp.writeFile(credPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
-          const defaults: Record<string, string> = { anthropic: "claude-sonnet-4-20250514", openai: "gpt-5-mini", gemini: "gemini-2.5-flash", groq: "openai/gpt-oss-20b", openrouter: "anthropic/claude-sonnet-4" };
+          const defaults: Record<string, string> = { anthropic: "claude-sonnet-4-20250514", codex: "gpt-5.4", gemini: "gemini-2.5-flash", groq: "openai/gpt-oss-20b", openrouter: "anthropic/claude-sonnet-4" };
           agent.getMulti().register(settingsProvider as any, line.trim(), defaults[settingsProvider] ?? "default");
           setEntries((c) => [...c, { role: "system", text: `${settingsProvider} configured and saved.` }]);
         }

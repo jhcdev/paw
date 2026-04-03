@@ -12,12 +12,8 @@ const PRICING: Record<string, { input: number; output: number }> = {
   "claude-haiku-4-5-20251001": { input: 0.80, output: 4.00 },
   "claude-sonnet-4-20250514": { input: 3.00, output: 15.00 },
   "claude-opus-4-20250514": { input: 15.00, output: 75.00 },
-  // OpenAI
-  "gpt-5-nano": { input: 0.10, output: 0.40 },
-  "gpt-5-mini": { input: 0.40, output: 1.60 },
-  "gpt-5.2": { input: 2.00, output: 8.00 },
-  "gpt-5.2-codex": { input: 2.00, output: 8.00 },
-  "o4-mini": { input: 1.10, output: 4.40 },
+  // Codex (subscription-based, no per-token cost)
+  "gpt-5.4": { input: 0, output: 0 },
   // Gemini
   "gemini-2.5-flash": { input: 0.15, output: 0.60 },
   "gemini-2.5-pro": { input: 1.25, output: 10.00 },
@@ -29,7 +25,7 @@ const PRICING: Record<string, { input: number; output: number }> = {
 // Fallback pricing by provider
 const PROVIDER_DEFAULT_PRICING: Partial<Record<ProviderName, { input: number; output: number }>> = {
   anthropic: { input: 3.00, output: 15.00 },
-  openai: { input: 0.40, output: 1.60 },
+  codex: { input: 0, output: 0 },
   gemini: { input: 0.15, output: 0.60 },
   groq: { input: 0.10, output: 0.10 },
   openrouter: { input: 1.00, output: 5.00 },

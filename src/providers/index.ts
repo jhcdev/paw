@@ -1,5 +1,6 @@
 import type { LlmProvider, ProviderName } from "../types.js";
 import { AnthropicProvider } from "./anthropic.js";
+import { CodexProvider } from "./codex.js";
 import { GeminiProvider } from "./gemini.js";
 import { OpenAIProvider } from "./openai.js";
 
@@ -13,10 +14,10 @@ export function createProvider(args: {
   switch (args.provider) {
     case "anthropic":
       return new AnthropicProvider(args);
+    case "codex":
+      return new CodexProvider({ model: args.model, cwd: args.cwd });
     case "gemini":
       return new GeminiProvider(args);
-    case "openai":
-      return new OpenAIProvider(args);
     case "groq":
     case "openrouter":
       return new OpenAIProvider({ ...args, baseUrl: args.baseUrl });

@@ -21,7 +21,7 @@ type ParsedArgs = {
   doList: boolean;
 };
 
-const VALID_PROVIDERS = new Set<string>(["anthropic", "openai", "gemini", "groq", "openrouter", "ollama"]);
+const VALID_PROVIDERS = new Set<string>(["anthropic", "codex", "gemini", "groq", "openrouter", "ollama"]);
 
 function printHelp(): void {
   process.stdout.write(`${pc.bold(pc.cyan("Cat's Claw"))} — Multi-provider terminal coding assistant\n\n`);
@@ -33,7 +33,7 @@ function printHelp(): void {
   process.stdout.write(`  --help              Show this help\n`);
   process.stdout.write(`  --tools             List available tools\n`);
   process.stdout.write(`  --cwd <dir>         Set workspace root\n`);
-  process.stdout.write(`  --provider <name>   anthropic, openai, gemini, groq, openrouter, ollama\n`);
+  process.stdout.write(`  --provider <name>   anthropic, codex, gemini, groq, openrouter, ollama\n`);
   process.stdout.write(`  --model <id>        Override model for the session\n`);
   process.stdout.write(`  --list              Show saved credentials\n`);
   process.stdout.write(`  --logout [provider] Remove saved credentials\n\n`);
@@ -121,8 +121,8 @@ async function main(): Promise<void> {
     const detected = await (await import("./multi-provider.js")).detectProviders(process.env as Record<string, string | undefined>);
 
     if (detected.length > 0) {
-      // Pick best available: anthropic > openai > gemini > groq > openrouter > ollama
-      const priority: ProviderName[] = ["anthropic", "openai", "gemini", "groq", "openrouter", "ollama"];
+      // Pick best available: anthropic > codex > gemini > groq > openrouter > ollama
+      const priority: ProviderName[] = ["anthropic", "codex", "gemini", "groq", "openrouter", "ollama"];
       const best = priority.find((p) => detected.some((d) => d.provider === p));
       const chosen = detected.find((d) => d.provider === best) ?? detected[0]!;
       auth = { provider: chosen.provider, apiKey: chosen.apiKey, model: chosen.model, baseUrl: chosen.baseUrl };

@@ -5,14 +5,12 @@ import type { ProviderName } from "./types.js";
 
 loadEnv({ quiet: true });
 
-const providerSchema = z.enum(["anthropic", "openai", "gemini", "groq", "openrouter", "ollama"]);
+const providerSchema = z.enum(["anthropic", "codex", "gemini", "groq", "openrouter", "ollama"]);
 
 const envSchema = z.object({
   LLM_PROVIDER: providerSchema.default("anthropic"),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-4-20250514"),
-  OPENAI_API_KEY: z.string().optional(),
-  OPENAI_MODEL: z.string().min(1).default("gpt-5-mini"),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().min(1).default("gemini-2.5-flash"),
   GROQ_API_KEY: z.string().optional(),
@@ -61,11 +59,6 @@ export function loadConfig(overrides?: Partial<Pick<AppConfig, "provider" | "mod
   const provider = overrides?.provider ?? parsed.data.LLM_PROVIDER;
 
   switch (provider) {
-    case "openai": {
-      const apiKey = parsed.data.OPENAI_API_KEY?.trim();
-      if (isPlaceholder(apiKey)) throw new Error("OPENAI_API_KEY is required when LLM_PROVIDER=openai");
-      return { provider, apiKey: apiKey!, model: overrides?.model ?? parsed.data.OPENAI_MODEL };
-    }
     case "gemini": {
       const apiKey = parsed.data.GEMINI_API_KEY?.trim();
       if (isPlaceholder(apiKey)) throw new Error("GEMINI_API_KEY is required when LLM_PROVIDER=gemini");

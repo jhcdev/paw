@@ -1,4 +1,4 @@
-export type ProviderName = "anthropic" | "openai" | "gemini" | "groq" | "openrouter" | "ollama";
+export type ProviderName = "anthropic" | "codex" | "gemini" | "groq" | "openrouter" | "ollama";
 
 export type TokenUsage = {
   inputTokens: number;

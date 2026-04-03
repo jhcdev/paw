@@ -4,7 +4,6 @@ import os from "node:os";
 import readline from "node:readline/promises";
 import pc from "picocolors";
 import { readClaudeAuth } from "./claude-auth.js";
-import { readCodexAuth } from "./codex-auth.js";
 import type { ProviderName } from "./types.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".cats-claw");
@@ -28,7 +27,7 @@ async function saveCredentials(creds: StoredCredentials): Promise<void> {
 
 const PROVIDERS: { name: ProviderName; label: string; emoji: string; description: string; defaultModel: string; needsKey: boolean }[] = [
   { name: "anthropic", label: "Anthropic", emoji: "~", description: "Claude models (API key or Claude login)", defaultModel: "claude-sonnet-4-20250514", needsKey: true },
-  { name: "openai", label: "OpenAI", emoji: "~", description: "GPT models (API key or Codex login)", defaultModel: "gpt-5-mini", needsKey: true },
+  { name: "codex", label: "Codex", emoji: "~", description: "Codex CLI models (codex login)", defaultModel: "gpt-5.4", needsKey: false },
   { name: "gemini", label: "Gemini", emoji: "~", description: "Google Gemini (strong long-context)", defaultModel: "gemini-2.5-flash", needsKey: true },
   { name: "groq", label: "Groq", emoji: "~", description: "Fast inference, open models", defaultModel: "openai/gpt-oss-20b", needsKey: true },
   { name: "openrouter", label: "OpenRouter", emoji: "~", description: "Multi-model hub, max flexibility", defaultModel: "anthropic/claude-sonnet-4", needsKey: true },
@@ -107,26 +106,6 @@ export async function interactiveLogin(overrides?: {
       }
     }
 
-    // Check Codex login for OpenAI
-    if (provider === "openai" && !saved?.apiKey) {
-      const codexAuth = await readCodexAuth();
-      if (codexAuth) {
-        const { verifyCodexToken } = await import("./codex-auth.js");
-        process.stdout.write(`  ${pc.gray("~")} Checking Codex token...\n`);
-        const valid = await verifyCodexToken(codexAuth.accessToken);
-        if (valid) {
-          const useCodex = await rl.question(`  ${pc.red("=^.^=")} Use Codex login (${pc.green(codexAuth.authMode)})? [Y/n]: `);
-          if (!useCodex || useCodex.toLowerCase() !== "n") {
-            apiKey = codexAuth.accessToken;
-            process.stdout.write(`  ${pc.green("~")} Using Codex ${codexAuth.authMode} login~ meow\n`);
-          }
-        } else {
-          process.stdout.write(`  ${pc.yellow("~")} Codex login found but token lacks API access.\n`);
-          process.stdout.write(`  ${pc.yellow("~")} Get an API key at ${pc.gray("platform.openai.com/api-keys")}\n`);
-        }
-      }
-    }
-
     if (!apiKey && saved?.apiKey) {
       const masked = "***..." + saved.apiKey.slice(-4);
       const reuse = await rl.question(`  ${pc.red("=^.^=")} Use saved key (${pc.gray(masked)})? [Y/n]: `);
@@ -137,7 +116,7 @@ export async function interactiveLogin(overrides?: {
     }
 
     if (!apiKey) {
-      const hint = provider === "openai" ? ` (or run ${pc.gray("codex login")} first)` : "";
+      const hint = "";
       apiKey = await rl.question(`  ${pc.red("=^.^=")} ${providerInfo.label} API key${hint}: `);
       apiKey = apiKey.trim();
       if (!apiKey) {

@@ -138,21 +138,16 @@ export async function detectProviders(env: Record<string, string | undefined>): 
       }
     } catch {}
   }
-  check("openai", "OPENAI_API_KEY", "OPENAI_MODEL", "gpt-5-mini");
-
-  // Codex login fallback for OpenAI (verify token works first)
-  if (!found.some((p) => p.provider === "openai")) {
-    try {
-      const { readCodexAuth, verifyCodexToken } = await import("./codex-auth.js");
-      const codex = await readCodexAuth();
-      if (codex && await verifyCodexToken(codex.accessToken)) {
-        found.push({ provider: "openai", apiKey: codex.accessToken, model: env.OPENAI_MODEL?.trim() || "gpt-5-mini" });
-      }
-    } catch {}
-  }
   check("gemini", "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-2.5-flash");
   check("groq", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-20b", "https://api.groq.com/openai/v1");
   check("openrouter", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "anthropic/claude-sonnet-4", env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1");
+
+  // Codex CLI (no API key needed, uses its own auth)
+  try {
+    const { execSync } = await import("node:child_process");
+    execSync("codex --version", { stdio: "ignore", timeout: 3000 });
+    found.push({ provider: "codex", apiKey: "", model: env.CODEX_MODEL?.trim() || "gpt-5.4" });
+  } catch {}
 
   // Ollama (no key needed)
   if (env.OLLAMA_MODEL?.trim() || env.OLLAMA_BASE_URL?.trim()) {
