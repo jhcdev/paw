@@ -109,6 +109,19 @@ export class CodingAgent {
     return this.currentModel;
   }
 
+  setCodexEffort(effort: string): void {
+    if ("setEffort" in this.provider && typeof (this.provider as any).setEffort === "function") {
+      (this.provider as any).setEffort(effort);
+    }
+  }
+
+  getCodexEffort(): string {
+    if ("getEffort" in this.provider && typeof (this.provider as any).getEffort === "function") {
+      return (this.provider as any).getEffort();
+    }
+    return "medium";
+  }
+
   /** Switch the active provider and model. Returns true if successful. */
   switchProvider(provider: ProviderName, model?: string): { ok: boolean; error?: string } {
     const registered = this.multi.getRegistered();

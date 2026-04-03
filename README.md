@@ -34,8 +34,8 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                               │  Init (parallel)   │
                               │  ┌──────┬────────┐ │
                               │  │ MCP  │  Team  │ │
-                              │  │.mcp  │ detect │ ���
-                              │  │.json │ score  │ ���
+                              │  │.mcp  │ detect │ │
+                              │  │.json │ score  │ │
                               │  └──────┴────────┘ │
                               └─────────┬─────────┘
                                         │
@@ -67,7 +67,7 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                                       │ Response   │
                                       │ + Usage    │
                                       │ + Status   │
-                                      └─────���─────┘
+                                      └───────────┘
 ```
 
 ### Fallback Flow
@@ -87,7 +87,7 @@ Provider API Call
 ### Team Pipeline
 
 ```
-  ┌──────────┐     ┌──────────┐     ┌──────────┐  ┌──────���───┐     ┌──��───────┐
+  ┌──────────┐     ┌──────────┐     ┌──────────┐  ┌──────────┐     ┌──────────┐
   │ PLANNER  │────▶│  CODER   │────▶│ REVIEWER  │  │  TESTER  │────▶│OPTIMIZER │
   │(reason)  │     │(implement│     │(bugs,sec) │  │(tests)   │     │(perf,dx) │
   │          │     │          │     └──────────┘  └──────────┘     │          │
@@ -98,14 +98,14 @@ Provider API Call
   ┌─────────────────────────────────────────────┐
   │ anthropic → planner (10), reviewer (9)      │
   │ ollama    → coder (unique spread)           │
-  │ openai    → tester (9), optimizer (9)       │
+  │ codex     → tester (9), optimizer (8)       │
   └─────────────────────────────────────────────┘
 ```
 
 ## Features
 
-- **Multi-provider** — Anthropic, OpenAI, Gemini, Groq, OpenRouter, Ollama
-- **Auto-detect** — No login prompt; auto-detects Claude, Codex, API keys, and .env
+- **Multi-provider** — Anthropic, Codex, Gemini, Groq, OpenRouter, Ollama
+- **Auto-detect** — No login prompt; auto-detects Claude login, Codex CLI, API keys, and .env
 - **Solo/Team mode** — Single provider or 5-agent collaboration pipeline in one terminal
 - **Arrow-key UI** — All panels use ↑↓ navigate, Enter select, Esc back
 - **MCP support** — Connect external tools via Model Context Protocol (stdio/http/sse)
@@ -158,17 +158,47 @@ If nothing is detected, it opens the provider selection menu.
 
 ## Providers
 
-### Cloud Providers (API key or login)
+| Provider | Auth | Notes |
+|----------|------|-------|
+| Anthropic | API key or Claude login | Best reasoning/planning |
+| Codex | codex login (ChatGPT subscription) | Best coding, no API key |
+| Gemini | API key | Best long-context |
+| Groq | API key | Fastest inference |
+| OpenRouter | API key | Multi-model hub |
+| Ollama | (none) | Local, free |
 
-| Provider | Auth | How to get access |
-|----------|------|------------------|
-| Anthropic | API key or Claude login | [console.anthropic.com](https://console.anthropic.com), or `claude` CLI login |
-| OpenAI | API key or Codex login | [platform.openai.com](https://platform.openai.com), or `codex login` |
-| Gemini | API key | [aistudio.google.com](https://aistudio.google.com/apikey) |
-| Groq | API key | [console.groq.com](https://console.groq.com) |
-| OpenRouter | API key | [openrouter.ai](https://openrouter.ai) |
+### Anthropic
 
-### Local Provider (Ollama)
+Use your Anthropic API key, or reuse an existing Claude Code session automatically.
+
+### Codex
+
+Codex uses the [Codex CLI](https://github.com/openai/codex) (`codex exec`) with a ChatGPT subscription — no API key needed. Auto-detected via `codex --version`.
+
+```bash
+# 1. Install Codex CLI
+npm install -g @openai/codex
+# 2. Log in with your ChatGPT account
+codex login
+# 3. Start Cat's Claw
+paw --provider codex
+```
+
+Codex supports **effort levels** per request: `low`, `medium`, `high`, `extra_high`.
+
+### Gemini
+
+API key from [aistudio.google.com](https://aistudio.google.com/apikey). Best for long-context tasks.
+
+### Groq
+
+API key from [console.groq.com](https://console.groq.com). Fastest inference of the cloud providers.
+
+### OpenRouter
+
+API key from [openrouter.ai](https://openrouter.ai). Routes to dozens of models including open-source options.
+
+### Ollama (Local)
 
 Free, no account needed. Runs models on your machine.
 
@@ -189,14 +219,14 @@ Manage all providers from one panel — arrow keys to navigate:
 ```
 ╭─ Provider Settings ──────────────────╮
 │  > ● Anthropic (active)              │
-│    ● OpenAI                          │
+│    ● Codex                           │
 │    ○ Gemini                          │
 │    ○ Groq                            │
 │    ○ OpenRouter                      │
 │    ● Ollama (local)                  │
 │                                      │
 │  ↑↓ navigate  Enter select  Esc back │
-╰───��──────────────────────────────────╯
+╰──────────────────────────────────────╯
 ```
 
 Select a provider → choose auth method:
@@ -207,26 +237,26 @@ Select a provider → choose auth method:
 │    Enter API key manually            │
 │                                      │
 │  ↑↓ navigate  Enter select  Esc back │
-╰��─────────────────────────────────────╯
+╰──────────────────────────────────────╯
 ```
 
 - **Anthropic**: use Claude Code session or API key
-- **OpenAI**: use Codex session or API key
+- **Codex**: use Codex CLI login (ChatGPT subscription)
 - **Others**: API key only
 - **Ollama**: no auth needed
 
 ### Auto-Login
 
-If you have Claude Code or Codex installed, Cat's Claw reuses the session automatically:
+Cat's Claw reuses existing sessions automatically on startup:
 
 | CLI Tool | Auth File | Provider |
-|----------|----------|----------|
+|----------|-----------|----------|
 | Claude Code | `~/.claude/.credentials.json` | Anthropic |
-| Codex | `~/.codex/auth.json` | OpenAI |
+| Codex CLI | `~/.codex/auth.json` | Codex |
 
 ### Model Catalog (`/model`)
 
-Shows models filtered by your plan. Ollama shows actually pulled models:
+Shows models filtered by your subscription plan. Ollama shows actually pulled models:
 
 ```
 * anthropic (max):
@@ -236,13 +266,17 @@ Shows models filtered by your plan. Ollama shows actually pulled models:
   4. claude-opus-4-20250514 — Opus 4
   5. claude-opus-4-6-20250725 — Opus 4.6
 
-  openai (pro):
-  1. gpt-4o-mini — GPT-4o Mini
-  2. gpt-4o — GPT-4o
-  3. gpt-5-nano — GPT-5 Nano
-  4. gpt-5-mini — GPT-5 Mini
-  5. o4-mini — o4 Mini
+  codex (pro):
+  1. gpt-5.4 — GPT-5.4 (default)
+  2. gpt-5.4-mini — GPT-5.4 Mini
+  3. gpt-5.3-codex — GPT-5.3 Codex
+  4. gpt-5.3-codex-spark — GPT-5.3 Codex Spark
+  5. gpt-5.2-codex — GPT-5.2 Codex
   6. gpt-5.2 — GPT-5.2
+  7. gpt-5.1-codex-max — GPT-5.1 Codex Max
+  8. gpt-5.1-codex-mini — GPT-5.1 Codex Mini
+  9. o4-mini — o4 Mini
+  10. o3 — o3
 
 * ollama:
   1. qwen3:latest — qwen3:latest (8.2B)
@@ -251,9 +285,9 @@ Shows models filtered by your plan. Ollama shows actually pulled models:
 Switch by number or ID:
 
 ```
-/model anthropic 4      # Switch to Opus 4
-/model ollama 1         # Switch to qwen3
-/model openai gpt-5.2   # Switch by ID
+/model anthropic 4        # Switch to Opus 4
+/model ollama 1           # Switch to qwen3
+/model codex gpt-5.4      # Switch by ID
 ```
 
 ## Modes
@@ -294,14 +328,14 @@ Arrow-key interface for viewing and editing team configuration:
 │  planner   anthropic/claude-sonnet-4 │
 │  coder     ollama/qwen3             │
 │  reviewer  anthropic/claude-sonnet-4 │
-│  tester    openai/gpt-5-mini        ���
-│  optimizer openai/gpt-5-mini        │
+│  tester    codex/gpt-5.4            │
+│  optimizer codex/gpt-5.4            │
 │                                      │
 │  > Edit role assignment              │
 │    Toggle mode (→ team)              │
 │                                      │
 │  ↑↓ navigate  Enter select  Esc back │
-╰─���────────────────────────────────────╯
+╰──────────────────────────────────────╯
 ```
 
 Edit role → pick role → pick provider (all arrow-key based).
@@ -309,6 +343,8 @@ Edit role → pick role → pick provider (all arrow-key based).
 ### Auto-Assignment
 
 Roles assigned by efficiency scores. Uses greedy unique-first to spread across providers. Scores adapt from real usage after 3+ runs per role.
+
+**Codex role scores:** planner 8, coder 9, reviewer 7, tester 9, optimizer 8
 
 ### Automatic Fallback
 
@@ -326,7 +362,7 @@ Active: anthropic/claude-sonnet-4
 
 Providers (3):
   * anthropic — claude-sonnet-4
-    openai — gpt-5-mini
+    codex — gpt-5.4
     ollama — qwen3
 
 Usage:
@@ -381,7 +417,7 @@ Arrow-key interface:
 │    Remove server                     │
 │    Back                              │
 │                                      │
-│  ��↓ navigate  Enter select  Esc back │
+│  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
 ```
 
@@ -468,7 +504,7 @@ TEAM/qwen3                 turns: 2  mcp: off           local
 ```bash
 paw --list              # Show saved credentials
 paw --logout            # Remove all saved keys
-paw --logout openai     # Remove specific key
+paw --logout codex      # Remove specific provider key
 ```
 
 ## Examples
@@ -497,8 +533,8 @@ you  implement a JWT authentication system
 =^.^= Planning (anthropic/claude-sonnet-4)...
 =^.^= Implementing (ollama/qwen3)...
 =^.^= Reviewing (anthropic/claude-sonnet-4)...
-=^.^= Testing (openai/gpt-5-mini)...
-=^.^= Optimizing (openai/gpt-5-mini)...
+=^.^= Testing (codex/gpt-5.4)...
+=^.^= Optimizing (codex/gpt-5.4)...
 
 --- PLANNER (3200ms) ---  --- CODER (8100ms) ---
 --- REVIEWER (2800ms) --- --- TESTER (4200ms) ---
@@ -512,8 +548,8 @@ Total: 21400ms
 you  /ask gemini what's the time complexity?
 =^.^= [gemini] O(n log n) because...
 
-you  /ask openai any security issues?
-=^.^= [openai] SQL injection at line 42...
+you  /ask codex any security issues?
+=^.^= [codex] SQL injection at line 42...
 ```
 
 ### Fallback

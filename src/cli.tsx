@@ -105,7 +105,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [settingsPanel, setSettingsPanel] = useState<"off" | "list" | "auth-method" | "add-key">("off");
   const [settingsProvider, setSettingsProvider] = useState<string>("");
   const [settingsCursor, setSettingsCursor] = useState(0);
-  const [modelPanel, setModelPanel] = useState<"off" | "providers" | "models">("off");
+  const [modelPanel, setModelPanel] = useState<"off" | "providers" | "models" | "effort">("off");
   const [modelPanelProvider, setModelPanelProvider] = useState<string>("");
   const [modelPanelModels, setModelPanelModels] = useState<{ id: string; name: string }[]>([]);
   const [modelCursor, setModelCursor] = useState(0);
@@ -175,11 +175,31 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const result = agent.switchProvider(modelPanelProvider as any, selected.id);
           if (result.ok) {
             setProviderVersion((v) => v + 1);
+            if (modelPanelProvider === "codex") {
+              // Show effort picker for Codex
+              setModelPanel("effort");
+              setModelCursor(1); // default = medium (index 1)
+              return;
+            }
             setEntries((c) => [...c, { role: "system", text: `Switched to ${modelPanelProvider}/${selected.id}` }]);
           } else {
             setEntries((c) => [...c, { role: "system", text: result.error ?? "Failed to switch." }]);
           }
         }
+        setModelPanel("off");
+        return;
+      }
+      return;
+    }
+    if (modelPanel === "effort") {
+      const efforts = ["low", "medium", "high", "extra_high"] as const;
+      if (key.escape) { setModelPanel("models"); setModelCursor(0); return; }
+      if (key.downArrow) { setModelCursor((i) => Math.min(i + 1, efforts.length - 1)); return; }
+      if (key.upArrow) { setModelCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const selected = efforts[modelCursor]!;
+        agent.setCodexEffort(selected);
+        setEntries((c) => [...c, { role: "system", text: `Codex: ${agent.getActiveModel()} (effort: ${selected})` }]);
         setModelPanel("off");
         return;
       }
@@ -310,7 +330,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
     if (key.escape && !isBusy) exit();
 
-    if (suggestions.length > 0 && mcpMode === "off") {
+    if (suggestions.length > 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
       if (key.downArrow) {
         setSelectedIdx((i) => Math.min(i + 1, suggestions.length - 1));
         return;
@@ -323,6 +343,16 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const selected = suggestions[selectedIdx];
         if (selected) setInput(selected.name);
         setSelectedIdx(0);
+        return;
+      }
+      if (key.return) {
+        const selected = suggestions[selectedIdx];
+        if (selected) {
+          setInput("");
+          setSelectedIdx(0);
+          // Directly trigger submit with the selected command
+          submit(selected.name);
+        }
         return;
       }
     }
@@ -860,6 +890,21 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                   </Text>
                   <Text color="gray"> — {m.name}</Text>
                   {m.id === agent.getActiveModel() ? <Text color="green"> *</Text> : null}
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+
+          {modelPanel === "effort" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select effort level for <Text bold color="#ffb088">Codex/{agent.getActiveModel()}</Text>:</Text>
+              {(["Low — Fast responses, lighter reasoning", "Medium — Balanced speed and depth (default)", "High — Greater reasoning for complex problems", "Extra High — Maximum reasoning depth"] as const).map((label, i) => (
+                <Box key={label}>
+                  <Text color={i === modelCursor ? "#ff9c73" : "gray"} bold={i === modelCursor}>
+                    {i === modelCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === modelCursor ? "#ff9c73" : "gray"}>{label}</Text>
                 </Box>
               ))}
               <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
