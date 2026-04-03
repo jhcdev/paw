@@ -121,6 +121,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
 
+    // MCP add modes — Escape goes back to list
+    if (mcpMode === "add-name" || mcpMode === "add-cmd" || mcpMode === "add-args") {
+      if (key.escape) { setMcpMode("list"); setInput(""); return; }
+      // Let TextInput handle all other keys
+      return;
+    }
+
     // MCP mode keys
     if (mcpMode === "list") {
       if (key.escape || ch === "b" || ch === "q") { setMcpMode("off"); return; }
