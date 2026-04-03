@@ -103,27 +103,37 @@ export async function deleteSession(id: string): Promise<boolean> {
   }
 }
 
-/** Watch a session file for changes (from other terminals) */
+/** Watch a session file for changes (from other terminals) — instant via fs.watch */
 export function watchSession(
   id: string,
   onChange: (data: SessionData) => void,
 ): () => void {
   const filePath = path.join(SESSIONS_DIR, `${id}.json`);
-  let lastSize = 0;
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+  let lastContent = "";
 
-  const interval = setInterval(async () => {
+  const reload = async () => {
     try {
-      const stat = await fs.stat(filePath);
-      if (stat.size !== lastSize) {
-        lastSize = stat.size;
-        const raw = await fs.readFile(filePath, "utf8");
-        const data = JSON.parse(raw) as SessionData;
-        onChange(data);
+      const raw = await fs.readFile(filePath, "utf8");
+      if (raw !== lastContent) {
+        lastContent = raw;
+        onChange(JSON.parse(raw) as SessionData);
       }
     } catch {}
-  }, 1000); // Poll every 1s
+  };
 
-  return () => clearInterval(interval);
+  try {
+    const { watch } = require("node:fs") as typeof import("node:fs");
+    const watcher = watch(filePath, () => {
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(reload, 50); // 50ms debounce to batch rapid writes
+    });
+    return () => { watcher.close(); if (debounce) clearTimeout(debounce); };
+  } catch {
+    // Fallback to polling if fs.watch fails
+    const interval = setInterval(reload, 500);
+    return () => clearInterval(interval);
+  }
 }
 
 /** Append an entry to a session file atomically */
