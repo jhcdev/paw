@@ -3,6 +3,8 @@ import path from "node:path";
 import os from "node:os";
 import readline from "node:readline/promises";
 import pc from "picocolors";
+import { readClaudeAuth } from "./claude-auth.js";
+import { readCodexAuth } from "./codex-auth.js";
 import type { ProviderName } from "./types.js";
 
 const CONFIG_DIR = path.join(os.homedir(), ".cats-claw");
@@ -25,8 +27,8 @@ async function saveCredentials(creds: StoredCredentials): Promise<void> {
 }
 
 const PROVIDERS: { name: ProviderName; label: string; emoji: string; description: string; defaultModel: string; needsKey: boolean }[] = [
-  { name: "anthropic", label: "Anthropic", emoji: "~", description: "Claude models", defaultModel: "claude-sonnet-4-20250514", needsKey: true },
-  { name: "openai", label: "OpenAI", emoji: "~", description: "GPT models", defaultModel: "gpt-5-mini", needsKey: true },
+  { name: "anthropic", label: "Anthropic", emoji: "~", description: "Claude models (API key or Claude login)", defaultModel: "claude-sonnet-4-20250514", needsKey: true },
+  { name: "openai", label: "OpenAI", emoji: "~", description: "GPT models (API key or Codex login)", defaultModel: "gpt-5-mini", needsKey: true },
   { name: "gemini", label: "Gemini", emoji: "~", description: "Google Gemini (strong long-context)", defaultModel: "gemini-2.5-flash", needsKey: true },
   { name: "groq", label: "Groq", emoji: "~", description: "Fast inference, open models", defaultModel: "openai/gpt-oss-20b", needsKey: true },
   { name: "openrouter", label: "OpenRouter", emoji: "~", description: "Multi-model hub, max flexibility", defaultModel: "anthropic/claude-sonnet-4", needsKey: true },
@@ -90,6 +92,33 @@ export async function interactiveLogin(overrides?: {
   if (providerInfo.needsKey) {
     const saved = creds[provider];
 
+    // Check Claude login for Anthropic
+    if (provider === "anthropic" && !saved?.apiKey) {
+      const claudeAuth = await readClaudeAuth();
+      if (claudeAuth && !claudeAuth.expired) {
+        const plan = claudeAuth.subscriptionType ?? "unknown";
+        const useIt = await rl.question(`  ${pc.red("=^.^=")} Use Claude login (${pc.green(plan)} plan)? [Y/n]: `);
+        if (!useIt || useIt.toLowerCase() !== "n") {
+          apiKey = claudeAuth.accessToken;
+          process.stdout.write(`  ${pc.green("~")} Using Claude ${plan} login~ meow\n`);
+        }
+      } else if (claudeAuth?.expired) {
+        process.stdout.write(`  ${pc.yellow("~")} Claude login expired. Run ${pc.gray("claude")} to refresh.\n`);
+      }
+    }
+
+    // Check Codex login for OpenAI
+    if (provider === "openai" && !saved?.apiKey) {
+      const codexAuth = await readCodexAuth();
+      if (codexAuth) {
+        const useCodex = await rl.question(`  ${pc.red("=^.^=")} Use Codex login (${pc.green(codexAuth.authMode)})? [Y/n]: `);
+        if (!useCodex || useCodex.toLowerCase() !== "n") {
+          apiKey = codexAuth.accessToken;
+          process.stdout.write(`  ${pc.green("~")} Using Codex ${codexAuth.authMode} login~ meow\n`);
+        }
+      }
+    }
+
     if (!apiKey && saved?.apiKey) {
       const masked = "***..." + saved.apiKey.slice(-4);
       const reuse = await rl.question(`  ${pc.red("=^.^=")} Use saved key (${pc.gray(masked)})? [Y/n]: `);
@@ -100,7 +129,8 @@ export async function interactiveLogin(overrides?: {
     }
 
     if (!apiKey) {
-      apiKey = await rl.question(`  ${pc.red("=^.^=")} ${providerInfo.label} API key: `);
+      const hint = provider === "openai" ? ` (or run ${pc.gray("codex login")} first)` : "";
+      apiKey = await rl.question(`  ${pc.red("=^.^=")} ${providerInfo.label} API key${hint}: `);
       apiKey = apiKey.trim();
       if (!apiKey) {
         rl.close();

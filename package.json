@@ -11,7 +11,9 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "dev": "tsx src/index.ts",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "proxy:compat": "tsx src/proxy/compat-server.ts",
+    "proxy:ollama": "tsx src/proxy/ollama-server.ts"
   },
   "engines": {
     "node": ">=22"
