@@ -29,8 +29,12 @@ export class CodingAgent {
       }
     }
 
-    // Auto-configure team
-    const teamConfig = autoConfigureTeam(detected);
+    // Team is configured in initTeam() (async)
+  }
+
+  async initTeam(): Promise<void> {
+    const detected = detectProviders(process.env as Record<string, string | undefined>);
+    const teamConfig = await autoConfigureTeam(detected);
     this.team.configure(teamConfig);
   }
 

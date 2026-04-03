@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     baseUrl: auth.baseUrl,
   });
 
-  await agent.initMcp(args.cwd);
+  await Promise.all([agent.initMcp(args.cwd), agent.initTeam()]);
 
   if (args.prompt) {
     const result = await agent.runTurn(args.prompt);
