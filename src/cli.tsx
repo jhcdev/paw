@@ -11,6 +11,7 @@ import TextInput from "ink-text-input";
 import type { CodingAgent } from "./agent.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
+import { formatModelList, getAllModels, resolveModelByIndex } from "./model-catalog.js";
 
 const execAsync = promisify(exec);
 
@@ -60,6 +61,7 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/tools", desc: "available tools" },
   { name: "/mcp", desc: "MCP server status" },
   { name: "/model", desc: "current model info" },
+  { name: "/models", desc: "list available models" },
   { name: "/cost", desc: "token usage" },
   { name: "/git", desc: "git status" },
   { name: "/diff", desc: "git diff" },
@@ -304,7 +306,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /help      - this menu",
             "  /tools     - available tools",
             "  /mcp       - MCP server status",
-            "  /model     - current model info",
+            "  /models    - list available models",
+            "  /model     - show/switch provider & model",
             "  /cost      - token usage",
             "  /git       - git status",
             "  /diff      - git diff",
@@ -349,6 +352,28 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+      // ── models ──
+      if (line === "/models" || line.startsWith("/models ")) {
+        const targetProvider = line.split(/\s+/)[1] as ProviderName | undefined;
+        if (targetProvider && agent.getMulti().isRegistered(targetProvider)) {
+          const list = formatModelList(targetProvider, targetProvider === agent.getActiveProvider() ? agent.getActiveModel() : undefined);
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Models for ${PROVIDER_LABELS[targetProvider] ?? targetProvider}:\n${list}\n\nSwitch: /model ${targetProvider} <number or id>` }]);
+        } else {
+          const all = getAllModels();
+          const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
+          const lines = all
+            .filter((g) => registered.has(g.provider) || g.provider === agent.getActiveProvider())
+            .map((g) => {
+              const label = PROVIDER_LABELS[g.provider] ?? g.provider;
+              const active = g.provider === agent.getActiveProvider();
+              const list = formatModelList(g.provider, active ? agent.getActiveModel() : undefined);
+              return `${active ? "* " : "  "}${label}:\n${list}`;
+            }).join("\n\n");
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Available Models (* = active):\n\n${lines}\n\nSwitch: /model <provider> <number or id>` }]);
+        }
+        return;
+      }
+
       // ── model ──
       if (line.startsWith("/model")) {
         const parts = line.split(/\s+/).slice(1);
@@ -382,8 +407,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `${role} → ${prov}/${mdl ?? cfg.model}` }]);
           }
         } else {
-          // Solo mode: /model <provider> [model]
-          const result = agent.switchProvider(parts[0] as ProviderName, parts[1]);
+          // Solo mode: /model <provider> [model or number]
+          const modelArg = parts[1];
+          const resolvedModel = modelArg && /^\d+$/.test(modelArg)
+            ? resolveModelByIndex(parts[0] as ProviderName, parseInt(modelArg, 10)) ?? modelArg
+            : modelArg;
+          const result = agent.switchProvider(parts[0] as ProviderName, resolvedModel);
           if (result.ok) {
             setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Switched to ${agent.getActiveProvider()}/${agent.getActiveModel()}` }]);
           } else {

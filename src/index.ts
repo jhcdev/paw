@@ -4,6 +4,7 @@ import { CodingAgent } from "./agent.js";
 import { interactiveLogin, listSavedProviders, logout } from "./auth.js";
 import { startRepl } from "./cli.js";
 import { mcpCli } from "./mcp-cli.js";
+import { formatModelList, getAllModels } from "./model-catalog.js";
 import { detectProviders } from "./multi-provider.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
@@ -153,6 +154,21 @@ async function main(): Promise<void> {
     }
     if (args.prompt === "/version") {
       process.stdout.write("Cat's Claw v1.0.0\n");
+      await agent.shutdown(); return;
+    }
+    if (args.prompt === "/models" || args.prompt?.startsWith("/models ")) {
+      const target = args.prompt.split(/\s+/)[1] as ProviderName | undefined;
+      if (target) {
+        process.stdout.write(`Models for ${target}:\n${formatModelList(target, agent.getActiveModel())}\n`);
+      } else {
+        const all = getAllModels();
+        const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
+        for (const g of all) {
+          if (!registered.has(g.provider) && g.provider !== agent.getActiveProvider()) continue;
+          const active = g.provider === agent.getActiveProvider();
+          process.stdout.write(`${active ? "* " : "  "}${g.provider}:\n${formatModelList(g.provider, active ? agent.getActiveModel() : undefined)}\n\n`);
+        }
+      }
       await agent.shutdown(); return;
     }
     if (args.prompt.startsWith("/team ")) {
