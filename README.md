@@ -141,8 +141,9 @@ paw
 # Use specific provider
 paw --provider ollama --model qwen3
 
-# Direct prompt (no REPL)
+# Direct prompt (no REPL, auto-detects credentials)
 paw "explain this project"
+paw --provider codex "refactor this function"
 
 # Team mode prompt
 paw "/team implement JWT auth"
@@ -184,7 +185,20 @@ codex login
 paw --provider codex
 ```
 
-Codex supports **effort levels** per request: `low`, `medium`, `high`, `extra_high`.
+Codex supports **effort levels** — select via `/model` after choosing a Codex model:
+
+| Level | Description |
+|-------|-------------|
+| Low | Fast responses with lighter reasoning |
+| Medium (default) | Balances speed and reasoning depth |
+| High | Greater reasoning for complex problems |
+| Extra High | Maximum reasoning depth |
+
+```
+/model → Codex → gpt-5.4 → Select effort:
+  > Medium — Balanced speed and depth (default)
+    High — Greater reasoning for complex problems
+```
 
 ### Gemini
 
@@ -466,9 +480,9 @@ Supports stdio, HTTP, SSE. MCP tools auto-injected into all providers.
 | Key | Action |
 |-----|--------|
 | `↑↓` | Navigate menus / autocomplete |
-| `Enter` | Select / confirm |
+| `Enter` | Select / confirm / execute autocomplete |
 | `Esc` | Go back / quit |
-| `Tab` | Autocomplete slash command |
+| `Tab` | Autocomplete (fill input without executing) |
 | `Ctrl+L` | Clear conversation |
 | `Ctrl+K` | Compact conversation |
 
