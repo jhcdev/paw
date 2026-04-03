@@ -5,8 +5,7 @@ import path from "node:path";
 import tty from "node:tty";
 import { promisify } from "node:util";
 import React, { useCallback, useMemo, useState } from "react";
-import { Box, Newline, render, Text, useApp, useInput } from "ink";
-import TextInput from "ink-text-input";
+import { Box, Newline, render, Text, useApp, useInput, useStdin } from "ink";
 
 import type { CodingAgent } from "./agent.js";
 import { toolDefinitions } from "./tools.js";
@@ -355,6 +354,33 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         }
         return;
       }
+    }
+
+    // Enter to submit (no autocomplete active)
+    if (key.return && !isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
+      const value = input;
+      setInput("");
+      submit(value);
+      return;
+    }
+
+    // Backspace
+    if (key.backspace || key.delete) {
+      setInput((prev) => {
+        const chars = [...prev];
+        chars.pop();
+        return chars.join("");
+      });
+      return;
+    }
+
+    // Regular character input (including Korean/CJK)
+    if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
+      setInput((prev) => {
+        const next = prev + ch;
+        if (next.startsWith("/")) setSelectedIdx(0);
+        return next;
+      });
     }
   });
 
@@ -1113,7 +1139,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       <Box borderStyle="round" borderColor="#d97757" paddingX={1}>
         <Text color="#ff9c73" bold>{" > "}</Text>
-        <TextInput value={input} onChange={(v) => { setInput(v); if (v.startsWith("/")) setSelectedIdx(0); }} onSubmit={submit} />
+        <Text>{input}</Text><Text color="#ff9c73">█</Text>
       </Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
