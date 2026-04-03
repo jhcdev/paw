@@ -144,23 +144,61 @@ paw "/team implement JWT auth"
 
 ## Providers
 
-| Provider | Auth Method | Notes |
-|----------|------------|-------|
-| Anthropic | `ANTHROPIC_API_KEY` or Claude login | Best reasoning/planning |
-| OpenAI | `OPENAI_API_KEY` or Codex login | Strong structured output |
-| Gemini | `GEMINI_API_KEY` | Best long-context, fast coding |
-| Groq | `GROQ_API_KEY` | Fastest inference |
-| OpenRouter | `OPENROUTER_API_KEY` | Multi-model hub |
-| Ollama | (none) | Local models, zero cost |
+### Cloud Providers (API key or login)
+
+These are hosted services. You need an account and either an API key or an existing CLI login session.
+
+| Provider | Auth | How to get access |
+|----------|------|------------------|
+| Anthropic | API key or Claude login | Sign up at [console.anthropic.com](https://console.anthropic.com), or install [Claude Code](https://claude.ai/download) and run `claude` to login |
+| OpenAI | API key or Codex login | Sign up at [platform.openai.com](https://platform.openai.com), or install [Codex](https://github.com/openai/codex) and run `codex login` |
+| Gemini | API key | Get a key at [aistudio.google.com](https://aistudio.google.com/apikey) |
+| Groq | API key | Sign up at [console.groq.com](https://console.groq.com) |
+| OpenRouter | API key | Sign up at [openrouter.ai](https://openrouter.ai) — access multiple models with one key |
+
+### Local Provider (Ollama — free, no account needed)
+
+Ollama runs AI models directly on your machine. No API key, no cloud, no cost.
+
+**Setup:**
+
+1. Install Ollama from [ollama.com/download](https://ollama.com/download)
+2. Pull a model:
+   ```bash
+   ollama pull qwen3          # ~5GB, good general model
+   # or
+   ollama pull qwen2.5-coder:7b   # optimized for code
+   ```
+3. Make sure Ollama is running:
+   ```bash
+   ollama serve    # if not already running in background
+   ```
+4. Start Cat's Claw:
+   ```bash
+   paw --provider ollama --model qwen3
+   ```
+
+**Hardware notes:**
+- 16GB RAM minimum, 32GB recommended
+- GPU helps significantly but CPU-only works (slower)
+- Smaller models (7B-8B) are the easiest starting point
 
 ### Auto-Login
 
-Cat's Claw automatically detects existing sessions:
+Cat's Claw automatically detects existing CLI sessions — no manual API key entry needed:
 
-- **Claude** — Reads `~/.claude/.credentials.json` (OAuth token from Claude Code)
-- **Codex** — Reads `~/.codex/auth.json` (OAuth token from Codex CLI)
+| CLI Tool | Auth File | Provider |
+|----------|----------|----------|
+| Claude Code (`claude`) | `~/.claude/.credentials.json` | Anthropic |
+| Codex (`codex login`) | `~/.codex/auth.json` | OpenAI |
 
-No manual API key entry needed if you're already logged in to either.
+If you already use Claude Code or Codex, just run `paw` and it will offer to reuse your session:
+
+```
+  =^.^= Use Claude login (max plan)? [Y/n]:
+```
+
+For other providers, enter your API key once and Cat's Claw saves it to `~/.cats-claw/credentials.json` (mode 0600) for next time.
 
 ## Modes
 
