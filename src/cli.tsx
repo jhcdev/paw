@@ -94,6 +94,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [mcpAddName, setMcpAddName] = useState("");
   const [mcpAddCmd, setMcpAddCmd] = useState("");
   const [mode, setMode] = useState<"solo" | "team">("solo");
+  const [teamPanel, setTeamPanel] = useState<"off" | "list" | "pick-role" | "pick-provider" | "pick-model">("off");
+  const [teamEditRole, setTeamEditRole] = useState<string>("");
+  const [teamEditProvider, setTeamEditProvider] = useState<string>("");
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
@@ -124,6 +127,16 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         { role: "system", text: "Conversation compacted. Recent context preserved." },
         ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
       ]);
+      return;
+    }
+
+    // Team panel — Escape goes back
+    if (teamPanel !== "off") {
+      if (key.escape) {
+        if (teamPanel === "list") { setTeamPanel("off"); }
+        else { setTeamPanel("list"); setInput(""); }
+        return;
+      }
       return;
     }
 
@@ -226,6 +239,46 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
         setMcpMode("list");
         return;
+      }
+
+      // ── Team panel submit flow ──
+      if (teamPanel === "list") {
+        const cmd = line.toLowerCase();
+        if (cmd === "e" || cmd === "edit") { setTeamPanel("pick-role"); setInput(""); return; }
+        if (cmd === "t" || cmd === "toggle") {
+          setMode((m) => m === "solo" ? "team" : "solo");
+          setTeamPanel("off"); setInput(""); return;
+        }
+        setTeamPanel("off"); setInput(""); return;
+      }
+      if (teamPanel === "pick-role") {
+        const roles = ["planner", "coder", "reviewer", "tester", "optimizer"];
+        if (roles.includes(line.toLowerCase())) {
+          setTeamEditRole(line.toLowerCase());
+          setTeamPanel("pick-provider"); setInput(""); return;
+        }
+        setTeamPanel("list"); setInput(""); return;
+      }
+      if (teamPanel === "pick-provider") {
+        const prov = line.toLowerCase();
+        if (agent.getMulti().isRegistered(prov as any)) {
+          setTeamEditProvider(prov);
+          setTeamPanel("pick-model"); setInput(""); return;
+        }
+        setTeamPanel("list"); setInput(""); return;
+      }
+      if (teamPanel === "pick-model") {
+        const modelName = line.trim();
+        const cfg = agent.getMulti().getProviderConfig(teamEditProvider as any);
+        if (cfg) {
+          agent.getTeam().assignRole(teamEditRole as any, {
+            provider: teamEditProvider as any,
+            model: modelName || cfg.model,
+            apiKey: cfg.apiKey,
+            baseUrl: cfg.baseUrl,
+          });
+        }
+        setTeamPanel("list"); setInput(""); return;
       }
 
       // ── Normal mode: skip empty/busy ──
@@ -480,10 +533,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       // ── team ──
+      if (line === "/team") {
+        setTeamPanel("list");
+        return;
+      }
       if (line.startsWith("/team ")) {
         const teamPrompt = line.slice(6).trim();
         if (!teamPrompt) {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /team <prompt>\nSends task through planner → coder → reviewer pipeline using different models." }]);
+          setTeamPanel("list");
           return;
         }
         if (!agent.getTeam().isReady()) {
@@ -659,7 +716,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, teamEditProvider],
   );
 
   const providerLabel = PROVIDER_LABELS[options.provider] ?? options.provider;
@@ -717,6 +774,47 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           <Text color="#ff9c73" bold>{"=^.^= "}</Text>
           <Text color="gray" italic>{thinkMsg}</Text>
           <Newline />
+        </Box>
+      ) : null}
+
+      {teamPanel !== "off" ? (
+        <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+          <Text color="#ff9c73" bold>Team Dashboard</Text>
+          <Text color="gray">Mode: <Text bold color={mode === "team" ? "green" : "yellow"}>{mode.toUpperCase()}</Text></Text>
+
+          {teamPanel === "list" ? (
+            <Box flexDirection="column" marginTop={1}>
+              {agent.getTeam().getRoles().map((r) => (
+                <Box key={r.role}>
+                  <Text color="#ffb088" bold>{`  ${r.role.padEnd(10)}`}</Text>
+                  <Text color="gray">{` ${r.provider}/${r.model}`}</Text>
+                </Box>
+              ))}
+              <Box marginTop={1} flexDirection="column">
+                <Text color="#cc8866">Type: <Text bold>e</Text>(dit role) / <Text bold>t</Text>(oggle mode) / Enter(back)</Text>
+              </Box>
+            </Box>
+          ) : null}
+
+          {teamPanel === "pick-role" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="#cc8866">Which role to edit? (planner/coder/reviewer/tester/optimizer):</Text>
+            </Box>
+          ) : null}
+
+          {teamPanel === "pick-provider" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray">Role: <Text bold color="#ffb088">{teamEditRole}</Text></Text>
+              <Text color="#cc8866">Provider ({agent.getMulti().getRegistered().map((p) => p.name).join("/")}): </Text>
+            </Box>
+          ) : null}
+
+          {teamPanel === "pick-model" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray">Role: <Text bold color="#ffb088">{teamEditRole}</Text> → {teamEditProvider}</Text>
+              <Text color="#cc8866">Model (Enter for default):</Text>
+            </Box>
+          ) : null}
         </Box>
       ) : null}
 
