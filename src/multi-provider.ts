@@ -116,7 +116,7 @@ export class MultiProvider {
 }
 
 /** Auto-detect providers from environment variables */
-export function detectProviders(env: Record<string, string | undefined>): { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[] {
+export async function detectProviders(env: Record<string, string | undefined>): Promise<{ provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[]> {
   const found: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[] = [];
 
   const check = (name: ProviderName, keyVar: string, modelVar: string, defaultModel: string, baseUrl?: string) => {
@@ -128,6 +128,17 @@ export function detectProviders(env: Record<string, string | undefined>): { prov
 
   check("anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "claude-sonnet-4-20250514");
   check("openai", "OPENAI_API_KEY", "OPENAI_MODEL", "gpt-5-mini");
+
+  // Codex login fallback for OpenAI
+  if (!found.some((p) => p.provider === "openai")) {
+    try {
+      const { readCodexAuth } = await import("./codex-auth.js");
+      const codex = await readCodexAuth();
+      if (codex) {
+        found.push({ provider: "openai", apiKey: codex.accessToken, model: env.OPENAI_MODEL?.trim() || "gpt-5-mini" });
+      }
+    } catch {}
+  }
   check("gemini", "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-2.5-flash");
   check("groq", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-20b", "https://api.groq.com/openai/v1");
   check("openrouter", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "anthropic/claude-sonnet-4", env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1");

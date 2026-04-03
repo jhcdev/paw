@@ -217,8 +217,28 @@ export async function autoConfigureTeam(
   const providerNames = available.map((p) => p.provider);
   const config: TeamConfig = {};
 
-  // For each role, pick the provider with the highest live score
+  // Phase 1: Greedy unique assignment — spread across providers first
+  const used = new Set<ProviderName>();
+  const candidates: { role: AgentRole; provider: ProviderName; score: number }[] = [];
   for (const role of ALL_ROLES) {
+    for (const pName of providerNames) {
+      candidates.push({ role, provider: pName, score: scores[pName]?.[role] ?? BASELINE[pName]?.[role] ?? 5 });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+
+  const assignedRoles = new Set<AgentRole>();
+  for (const c of candidates) {
+    if (assignedRoles.has(c.role) || used.has(c.provider)) continue;
+    config[c.role] = providerMap.get(c.provider)!;
+    assignedRoles.add(c.role);
+    used.add(c.provider);
+    if (assignedRoles.size === ALL_ROLES.length) break;
+  }
+
+  // Phase 2: Fill remaining roles with best available (allow duplicates)
+  for (const role of ALL_ROLES) {
+    if (config[role]) continue;
     let bestScore = -1;
     let bestProvider: ProviderName | null = null;
     for (const pName of providerNames) {

@@ -24,23 +24,18 @@ export class CodingAgent {
     this.multi = new MultiProvider(args.cwd);
     this.multi.register(args.provider, args.apiKey, args.model, args.baseUrl);
     this.team = new TeamRunner(args.cwd);
-
-    // Auto-detect other providers from env
-    const detected = detectProviders(process.env as Record<string, string | undefined>);
-    for (const p of detected) {
-      if (p.provider !== args.provider) {
-        this.multi.register(p.provider, p.apiKey, p.model, p.baseUrl);
-      }
-    }
-
-    // Team is configured in initTeam() (async)
   }
 
   async initTeam(): Promise<void> {
-    // Ensure dotenv is loaded before detecting
     const { config: loadEnv } = await import("dotenv");
     loadEnv({ quiet: true });
-    const detected = detectProviders(process.env as Record<string, string | undefined>);
+    const detected = await detectProviders(process.env as Record<string, string | undefined>);
+    // Register all detected providers for multi/team use
+    for (const p of detected) {
+      if (p.provider !== this.currentProvider) {
+        this.multi.register(p.provider, p.apiKey, p.model, p.baseUrl);
+      }
+    }
     const teamConfig = await autoConfigureTeam(detected);
     this.team.configure(teamConfig);
   }
