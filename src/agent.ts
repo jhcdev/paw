@@ -52,14 +52,17 @@ export class CodingAgent {
     return this.mcpManager.getFullStatus();
   }
 
-  async addMcpServer(name: string, config: { command: string; args?: string[]; env?: Record<string, string> }): Promise<void> {
-    await this.mcpManager.addServer(name, config);
-    // Re-inject tools
-    const defs = this.mcpManager.getToolDefinitions();
-    const handlers = this.mcpManager.getToolHandlers();
-    if (defs.length > 0 && "addExternalTools" in this.provider) {
-      (this.provider as LlmProviderWithExternalTools).addExternalTools(defs, handlers);
+  async addMcpServer(name: string, config: { command: string; args?: string[]; env?: Record<string, string> }): Promise<{ ok: boolean; error?: string }> {
+    const result = await this.mcpManager.addServer(name, config);
+    if (result.ok) {
+      // Re-inject tools
+      const defs = this.mcpManager.getToolDefinitions();
+      const handlers = this.mcpManager.getToolHandlers();
+      if (defs.length > 0 && "addExternalTools" in this.provider) {
+        (this.provider as LlmProviderWithExternalTools).addExternalTools(defs, handlers);
+      }
     }
+    return result;
   }
 
   async removeMcpServer(name: string): Promise<void> {

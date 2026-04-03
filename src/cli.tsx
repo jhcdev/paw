@@ -207,9 +207,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
       if (mcpMode === "add-args") {
         const args = line ? line.split(/\s+/) : [];
-        try {
-          await agent.addMcpServer(mcpAddName, { command: mcpAddCmd, args });
-        } catch {}
+        const result = await agent.addMcpServer(mcpAddName, { command: mcpAddCmd, args });
+        if (!result.ok) {
+          setEntries((c) => [...c, {
+            role: "system",
+            text: `Failed to connect "${mcpAddName}": ${result.error ?? "unknown error"}\nServer was not saved. Check the command and args, then try again.`,
+          }]);
+          setMcpMode("off");
+          return;
+        }
         const list = await agent.getMcpFullStatus();
         setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
         setMcpMode("list");

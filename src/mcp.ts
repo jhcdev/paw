@@ -243,7 +243,7 @@ export class McpManager {
     await fs.writeFile(filePath, JSON.stringify(config, null, 2), "utf8");
   }
 
-  async addServer(name: string, config: McpServerConfig): Promise<void> {
+  async addServer(name: string, config: McpServerConfig): Promise<{ ok: boolean; error?: string }> {
     const file = await this.readConfigFile();
     if (!file.mcpServers) file.mcpServers = {};
     file.mcpServers[name] = config;
@@ -251,10 +251,12 @@ export class McpManager {
     // Try to connect immediately
     try {
       await this.connectServer(name, config, this.cwd);
-      const defs = this.getToolDefinitions();
-      const handlers = this.getToolHandlers();
-    } catch {
-      // Will show as disconnected
+      return { ok: true };
+    } catch (err) {
+      // Connection failed — remove from config so broken entries don't persist
+      delete file.mcpServers[name];
+      await this.writeConfigFile(file);
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }
 
