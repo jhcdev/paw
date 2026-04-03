@@ -62,7 +62,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       "  ~( Tips )~",
       "",
       "  Type naturally to chat.",
-      "  /tools  - see my claws",
+      "  /tools  - available tools",
       "  /clear  - fresh start",
       "  /exit   - bye bye~",
       "",
@@ -88,7 +88,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (line === "/help") {
         setEntries((c) => [...c,
           { role: "user", text: line },
-          { role: "system", text: "  /help   - this menu\n  /tools  - available claws\n  /clear  - reset chat\n  /exit   - goodbye~" },
+          { role: "system", text: "  /help   - this menu\n  /tools  - available tools\n  /clear  - reset chat\n  /exit   - quit" },
         ]);
         return;
       }
@@ -97,7 +97,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const toolList = toolDefinitions.map((t) => `  ${t.name} - ${t.description}`).join("\n");
         setEntries((c) => [...c,
           { role: "user", text: line },
-          { role: "system", text: `My claws:\n${toolList}` },
+          { role: "system", text: `Tools:\n${toolList}` },
         ]);
         return;
       }
