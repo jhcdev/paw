@@ -3,6 +3,7 @@ import { UsageTracker } from "./usage-tracker.js";
 import { MultiProvider, detectProviders } from "./multi-provider.js";
 import { TeamRunner, autoConfigureTeam } from "./team.js";
 import { createProvider } from "./providers/index.js";
+import { HookManager } from "./hooks.js";
 import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage } from "./types.js";
 
 export class CodingAgent {
@@ -10,6 +11,7 @@ export class CodingAgent {
   private readonly mcpManager: McpManager;
   private readonly multi: MultiProvider;
   private readonly team: TeamRunner;
+  private readonly hooks: HookManager;
   private currentProvider: ProviderName;
   private currentModel: string;
   private readonly cwd: string;
@@ -26,6 +28,7 @@ export class CodingAgent {
     this.multi = new MultiProvider(args.cwd);
     this.multi.register(args.provider, args.apiKey, args.model, args.baseUrl);
     this.team = new TeamRunner(args.cwd);
+    this.hooks = new HookManager(args.cwd);
   }
 
   async initTeam(): Promise<void> {
@@ -40,6 +43,11 @@ export class CodingAgent {
     }
     const teamConfig = await autoConfigureTeam(detected);
     this.team.configure(teamConfig);
+    await this.hooks.load();
+  }
+
+  getHooks(): HookManager {
+    return this.hooks;
   }
 
   /** Restore conversation history from a session into the provider */
@@ -73,14 +81,17 @@ export class CodingAgent {
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
+    await this.hooks.run("pre-turn", { prompt }).catch(() => {});
     try {
       const result = await this.provider.runTurn(prompt);
       this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
       this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
       this.tracker.record(this.currentProvider, this.currentModel, result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0);
+      await this.hooks.run("post-turn", { response: result.text }).catch(() => {});
       return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      await this.hooks.run("on-error", { error: msg }).catch(() => {});
       const lower = msg.toLowerCase();
       const isRetryable = lower.includes("rate limit") || lower.includes("429") ||
         lower.includes("overloaded") || lower.includes("401") || lower.includes("403") ||

@@ -24,7 +24,7 @@ type ParsedArgs = {
   sessionId?: string;
 };
 
-const VALID_PROVIDERS = new Set<string>(["anthropic", "codex", "ollama"]);
+const VALID_PROVIDERS = new Set<string>(["codex", "ollama"]);
 
 function printHelp(): void {
   process.stdout.write(`${pc.bold(pc.cyan("Cat's Claw"))} — Multi-provider terminal coding assistant\n\n`);
@@ -36,7 +36,7 @@ function printHelp(): void {
   process.stdout.write(`  --help              Show this help\n`);
   process.stdout.write(`  --tools             List available tools\n`);
   process.stdout.write(`  --cwd <dir>         Set workspace root\n`);
-  process.stdout.write(`  --provider <name>   anthropic, codex, ollama\n`);
+  process.stdout.write(`  --provider <name>   codex, ollama\n`);
   process.stdout.write(`  --model <id>        Override model for the session\n`);
   process.stdout.write(`  --list              Show saved credentials\n`);
   process.stdout.write(`  --logout [provider] Remove saved credentials\n`);
@@ -144,8 +144,8 @@ async function main(): Promise<void> {
     const detected = await (await import("./multi-provider.js")).detectProviders(process.env as Record<string, string | undefined>);
 
     if (detected.length > 0) {
-      // Pick best available: anthropic > codex > ollama
-      const priority: ProviderName[] = ["anthropic", "codex", "ollama"];
+      // Pick best available: codex > ollama
+      const priority: ProviderName[] = ["codex", "ollama"];
       const best = priority.find((p) => detected.some((d) => d.provider === p));
       const chosen = detected.find((d) => d.provider === best) ?? detected[0]!;
       auth = { provider: chosen.provider, apiKey: chosen.apiKey, model: chosen.model, baseUrl: chosen.baseUrl };
@@ -235,6 +235,18 @@ async function main(): Promise<void> {
       process.stdout.write(`Provider: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n`);
       process.stdout.write(`Providers: ${agent.getMulti().getRegistered().map((p) => p.name).join(", ")}\n`);
       process.stdout.write(`MCP: ${agent.getMcpStatus().length} server(s)\n`);
+      await agent.shutdown(); return;
+    }
+    if (args.prompt === "/skills" || args.prompt === "/skill") {
+      const { loadSkills, formatSkillList } = await import("./skills.js");
+      const skills = await loadSkills(args.cwd);
+      process.stdout.write(`${formatSkillList(skills)}\n`);
+      await agent.shutdown(); return;
+    }
+    if (args.prompt === "/hooks") {
+      const hooks = agent.getHooks().listHooks();
+      if (hooks.length === 0) process.stdout.write("No hooks configured.\n");
+      else for (const h of hooks) process.stdout.write(`  ${h.event}: ${h.name ?? h.command}\n`);
       await agent.shutdown(); return;
     }
     if (args.prompt === "/sessions") {

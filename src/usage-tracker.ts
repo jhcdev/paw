@@ -8,17 +8,12 @@ type ProviderUsage = {
 
 // Approximate pricing per 1M tokens (USD) — updated as of mid-2025
 const PRICING: Record<string, { input: number; output: number }> = {
-  // Anthropic
-  "claude-haiku-4-5-20251001": { input: 0.80, output: 4.00 },
-  "claude-sonnet-4-20250514": { input: 3.00, output: 15.00 },
-  "claude-opus-4-20250514": { input: 15.00, output: 75.00 },
   // Codex (subscription-based, no per-token cost)
   "gpt-5.4": { input: 0, output: 0 },
 };
 
 // Fallback pricing by provider
 const PROVIDER_DEFAULT_PRICING: Partial<Record<ProviderName, { input: number; output: number }>> = {
-  anthropic: { input: 3.00, output: 15.00 },
   codex: { input: 0, output: 0 },
 };
 

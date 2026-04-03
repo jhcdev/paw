@@ -1,6 +1,3 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import type { ProviderName } from "./types.js";
 
 export type PlanLevel = "free" | "pro" | "max" | "team" | "enterprise" | "api";
@@ -24,18 +21,6 @@ function hasAccess(userPlan: PlanLevel, required: PlanLevel): boolean {
 // ── Full model catalogs with plan requirements ──
 
 const CATALOG: Record<ProviderName, ModelInfo[]> = {
-  anthropic: [
-    // Free / Pro
-    { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", tier: "fast", minPlan: "free" },
-    { id: "claude-sonnet-4-20250514", name: "Sonnet 4", tier: "standard", minPlan: "free" },
-    { id: "claude-sonnet-4-6-20250725", name: "Sonnet 4.6", tier: "standard", minPlan: "pro" },
-    // Max / Team
-    { id: "claude-opus-4-20250514", name: "Opus 4", tier: "strong", minPlan: "max" },
-    { id: "claude-opus-4-6-20250725", name: "Opus 4.6", tier: "strong", minPlan: "max" },
-    // API only (all models available)
-    { id: "claude-3-5-haiku-20241022", name: "Haiku 3.5", tier: "fast", minPlan: "api" },
-    { id: "claude-3-5-sonnet-20241022", name: "Sonnet 3.5 v2", tier: "standard", minPlan: "api" },
-  ],
   codex: [
     { id: "gpt-5.4", name: "GPT-5.4 (default)", tier: "strong", minPlan: "free" },
     { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", tier: "standard", minPlan: "free" },
@@ -65,25 +50,6 @@ const TIER_LABELS: Record<string, string> = {
 const PLAN_LABELS: Record<PlanLevel, string> = {
   free: "", pro: "pro", max: "max", team: "team", enterprise: "ent", api: "api",
 };
-
-// ── Plan detection ──
-
-/** Detect Anthropic plan from ~/.claude/.credentials.json */
-async function detectAnthropicPlan(): Promise<PlanLevel> {
-  try {
-    const raw = await fs.readFile(path.join(os.homedir(), ".claude", ".credentials.json"), "utf8");
-    const data = JSON.parse(raw);
-    const sub = data.claudeAiOauth?.subscriptionType?.toLowerCase() ?? "";
-    if (sub.includes("max")) return "max";
-    if (sub.includes("team")) return "team";
-    if (sub.includes("enterprise")) return "enterprise";
-    if (sub.includes("pro")) return "pro";
-    if (sub) return "free";
-    return "api"; // No subscription = API key user, all models available
-  } catch {
-    return "api"; // Can't read = assume API key
-  }
-}
 
 /** Detect locally pulled Ollama models */
 async function detectOllamaModels(): Promise<ModelInfo[]> {
@@ -123,7 +89,6 @@ export async function detectLiveModels(provider: ProviderName, apiKey: string, b
 /** Detect plan for a provider. API key = all models. Login = plan-based. */
 export async function detectPlan(provider: ProviderName): Promise<PlanLevel> {
   switch (provider) {
-    case "anthropic": return detectAnthropicPlan();
     case "codex": return "api";
     case "ollama":
       return "free"; // Local = all models (all marked free)

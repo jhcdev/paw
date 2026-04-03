@@ -29,7 +29,6 @@ type ChatEntry = {
 };
 
 const PROVIDER_LABELS: Record<ProviderName, string> = {
-  anthropic: "Anthropic",
   codex: "Codex",
   ollama: "Ollama",
 };
@@ -56,7 +55,6 @@ function formatTokens(n: number): string {
 }
 
 const ALL_PROVIDERS: { name: ProviderName; label: string; hasLogin: boolean }[] = [
-  { name: "anthropic", label: "Anthropic", hasLogin: true },
   { name: "codex", label: "Codex (CLI)", hasLogin: false },
   { name: "ollama", label: "Ollama (local)", hasLogin: false },
 ];
@@ -77,6 +75,8 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/doctor", desc: "diagnostics" },
   { name: "/sessions", desc: "list past sessions" },
   { name: "/session", desc: "current session ID" },
+  { name: "/skills", desc: "list available skills" },
+  { name: "/hooks", desc: "list configured hooks" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
 ];
@@ -224,7 +224,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const result = agent.switchProvider(modelPanelProvider as any, selected.id);
           if (result.ok) {
             setProviderVersion((v) => v + 1);
-            if (modelPanelProvider === "codex" || modelPanelProvider === "anthropic") {
+            if (modelPanelProvider === "codex") {
               // Show effort picker for CLI-based providers
               setModelPanel("effort");
               setModelCursor(1); // default = medium (index 1)
@@ -281,19 +281,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           if (settingsCursor === 1) { setSettingsPanel("add-key"); setInput(""); }
           else {
             // Login (cursor === 0)
-            const prov = settingsProvider;
             setSettingsPanel("off");
             setSettingsProvider("");
-            if (prov === "anthropic") {
-              import("./claude-auth.js").then(({ readClaudeAuth }) => readClaudeAuth()).then((auth) => {
-                if (auth && !auth.expired) {
-                  agent.getMulti().register("anthropic", auth.accessToken, "claude-sonnet-4-20250514");
-                  setEntries((c) => [...c, { role: "system", text: `Anthropic connected via Claude (${auth.subscriptionType ?? "login"})` }]);
-                } else {
-                  setEntries((c) => [...c, { role: "system", text: auth?.expired ? "Claude login expired. Run 'claude' to refresh." : "No Claude login found. Use API key." }]);
-                }
-              }).catch(() => setEntries((c) => [...c, { role: "system", text: "Failed to read Claude login." }]));
-            }
           }
           return;
         }
@@ -361,7 +350,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const cfg = agent.getMulti().getProviderConfig(teamEditProvider as any);
           if (cfg) {
             agent.getTeam().assignRole(teamEditRole as any, { provider: teamEditProvider as any, model: model.id, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl });
-            if (teamEditProvider === "codex" || teamEditProvider === "anthropic") {
+            if (teamEditProvider === "codex") {
               setTeamPanel("pick-effort");
               setSettingsCursor(1); // default medium
               return;
@@ -575,6 +564,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /compact   - compress conversation",
             "  /init      - generate CONTEXT.md",
             "  /doctor    - diagnostics",
+            "  /skills   - list available skills",
+            "  /hooks    - list configured hooks",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -882,12 +873,50 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── unknown command ──
+      // ── skills ──
+      if (line === "/skills" || line === "/skill") {
+        const { loadSkills, formatSkillList } = await import("./skills.js");
+        const skills = await loadSkills(options.cwd);
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Skills:\n${formatSkillList(skills)}\n\nUsage: /<skill-name> [context]` }]);
+        return;
+      }
+
+      // ── hooks ──
+      if (line === "/hooks") {
+        const hooks = agent.getHooks().listHooks();
+        if (hooks.length === 0) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No hooks configured.\n\nAdd hooks to .cats-claw/hooks.json:\n{\n  \"hooks\": [\n    { \"event\": \"pre-turn\", \"command\": \"echo preprocessing...\", \"name\": \"my-hook\" }\n  ]\n}" }]);
+        } else {
+          const list = hooks.map((h) => `  ${h.event}: ${h.name ?? h.command}`).join("\n");
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Hooks (${hooks.length}):\n${list}` }]);
+        }
+        return;
+      }
+
+      // ── unknown command / skill ──
       if (line.startsWith("/")) {
-        setEntries((c) => [...c,
-          { role: "user", text: line },
-          { role: "system", text: `Unknown command: ${line}\nType /help for available commands.` },
-        ]);
+        const skillName = line.slice(1).split(/\s+/)[0]!;
+        const skillContext = line.slice(1 + skillName.length).trim();
+        const { loadSkills } = await import("./skills.js");
+        const skills = await loadSkills(options.cwd);
+        const skill = skills.find((s) => s.name === skillName);
+        if (skill) {
+          const fullPrompt = skillContext ? `${skill.prompt}\n\nContext:\n${skillContext}` : skill.prompt;
+          setEntries((c) => [...c, { role: "user", text: line }]);
+          setIsBusy(true);
+          setThinkMsg(`running /${skillName}...`);
+          try {
+            const result = await agent.runTurn(fullPrompt);
+            setTurnCount((c) => c + 1);
+            setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
+          } catch (error) {
+            setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
+          } finally {
+            setIsBusy(false);
+          }
+          return;
+        }
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Unknown command: ${line}\nType /help for commands or /skills for skills.` }]);
         return;
       }
 
@@ -1070,7 +1099,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                     {settingsCursor === 0 ? " > " : "   "}
                   </Text>
                   <Text color={settingsCursor === 0 ? "#ff9c73" : "gray"}>
-                    Use {settingsProvider === "anthropic" ? "Claude Code" : "Codex"} login
+                    Use Codex login
                   </Text>
                 </Box>
                 <Box>

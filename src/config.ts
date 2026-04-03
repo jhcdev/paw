@@ -5,12 +5,10 @@ import type { ProviderName } from "./types.js";
 
 loadEnv({ quiet: true });
 
-const providerSchema = z.enum(["anthropic", "codex", "ollama"]);
+const providerSchema = z.enum(["codex", "ollama"]);
 
 const envSchema = z.object({
-  LLM_PROVIDER: providerSchema.default("anthropic"),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-4-20250514"),
+  LLM_PROVIDER: providerSchema.default("ollama"),
   OLLAMA_BASE_URL: z.string().min(1).default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().min(1).default("qwen3"),
 });
@@ -61,9 +59,7 @@ export function loadConfig(overrides?: Partial<Pick<AppConfig, "provider" | "mod
       };
     }
     default: {
-      const apiKey = parsed.data.ANTHROPIC_API_KEY?.trim();
-      if (isPlaceholder(apiKey)) throw new Error("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic");
-      return { provider: "anthropic", apiKey: apiKey!, model: overrides?.model ?? parsed.data.ANTHROPIC_MODEL };
+      return { provider: "codex", apiKey: "", model: overrides?.model ?? "gpt-5.4" };
     }
   }
 }
