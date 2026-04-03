@@ -109,6 +109,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [modelPanelProvider, setModelPanelProvider] = useState<string>("");
   const [modelPanelModels, setModelPanelModels] = useState<{ id: string; name: string }[]>([]);
   const [modelCursor, setModelCursor] = useState(0);
+  const [providerVersion, setProviderVersion] = useState(0);
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
@@ -173,6 +174,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         if (selected) {
           const result = agent.switchProvider(modelPanelProvider as any, selected.id);
           if (result.ok) {
+            setProviderVersion((v) => v + 1);
             setEntries((c) => [...c, { role: "system", text: `Switched to ${modelPanelProvider}/${selected.id}` }]);
           } else {
             setEntries((c) => [...c, { role: "system", text: result.error ?? "Failed to switch." }]);
@@ -506,6 +508,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             : modelArg;
           const result = agent.switchProvider(parts[0] as any, resolvedModel);
           if (result.ok) {
+            setProviderVersion((v) => v + 1);
             setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Switched to ${agent.getActiveProvider()}/${agent.getActiveModel()}` }]);
           } else {
             setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: result.error ?? "Failed." }]);
@@ -709,8 +712,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         checks.push(`Node: ${process.version}`);
         checks.push(`Platform: ${process.platform} ${process.arch}`);
         checks.push(`CWD: ${options.cwd}`);
-        checks.push(`Provider: ${PROVIDER_LABELS[options.provider] ?? options.provider}`);
-        checks.push(`Model: ${options.model}`);
+        checks.push(`Provider: ${PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider()}`);
+        checks.push(`Model: ${agent.getActiveModel()}`);
         // Git
         try {
           const { stdout } = await execAsync("git --version", { cwd: options.cwd });
@@ -770,10 +773,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion],
   );
 
-  const providerLabel = PROVIDER_LABELS[options.provider] ?? options.provider;
+  const providerLabel = PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider();
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -787,7 +790,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         <Box marginTop={1} borderStyle="single" borderColor="#553322" paddingX={1}>
           <Box width="50%" flexDirection="column">
             <Text color="#ffb088">Provider: <Text bold color="white">{providerLabel}</Text></Text>
-            <Text color="#ffb088">Model:    <Text bold color="white">{options.model}</Text></Text>
+            <Text color="#ffb088">Model:    <Text bold color="white">{agent.getActiveModel()}</Text></Text>
             <Text color="#ffb088">CWD:      <Text color="gray">{options.cwd}</Text></Text>
           </Box>
           <Box width="50%" flexDirection="column" borderLeft paddingLeft={2}>
@@ -1078,13 +1081,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       </Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
-        <Text color={mode === "team" ? "#ff9c73" : "gray"}>{mode === "team" ? "TEAM" : providerLabel}/{options.model}</Text>
+        <Text color={mode === "team" ? "#ff9c73" : "gray"}>{mode === "team" ? "TEAM" : providerLabel}/{agent.getActiveModel()}</Text>
         <Text color="gray">turns: {turnCount}</Text>
         <Text color={agent.getMcpStatus().length > 0 ? "green" : "gray"}>
           mcp: {agent.getMcpStatus().length > 0 ? `${agent.getMcpStatus().length} server(s)` : "off"}
         </Text>
         <Text color="gray">
-          {options.provider !== "ollama" ? `tokens: ${formatTokens(agent.getUsage().inputTokens + agent.getUsage().outputTokens)}` : "local"}
+          {agent.getActiveProvider() !== "ollama" ? `tokens: ${formatTokens(agent.getUsage().inputTokens + agent.getUsage().outputTokens)}` : "local"}
         </Text>
       </Box>
     </Box>
