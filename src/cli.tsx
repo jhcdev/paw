@@ -56,6 +56,15 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+const ALL_PROVIDERS: { name: ProviderName; label: string; hasLogin: boolean }[] = [
+  { name: "anthropic", label: "Anthropic", hasLogin: true },
+  { name: "openai", label: "OpenAI", hasLogin: true },
+  { name: "gemini", label: "Gemini", hasLogin: false },
+  { name: "groq", label: "Groq", hasLogin: false },
+  { name: "openrouter", label: "OpenRouter", hasLogin: false },
+  { name: "ollama", label: "Ollama (local)", hasLogin: false },
+];
+
 const COMMANDS: { name: string; desc: string }[] = [
   { name: "/help", desc: "show all commands" },
   { name: "/status", desc: "providers, usage, cost overview" },
@@ -90,11 +99,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [mcpAddName, setMcpAddName] = useState("");
   const [mcpAddCmd, setMcpAddCmd] = useState("");
   const [mode, setMode] = useState<"solo" | "team">("solo");
-  const [teamPanel, setTeamPanel] = useState<"off" | "list" | "pick-role" | "pick-provider" | "pick-model">("off");
+  const [teamPanel, setTeamPanel] = useState<"off" | "list" | "pick-role" | "pick-provider">("off");
   const [teamEditRole, setTeamEditRole] = useState<string>("");
   const [teamEditProvider, setTeamEditProvider] = useState<string>("");
-  const [settingsPanel, setSettingsPanel] = useState<"off" | "list" | "choose-auth" | "add-key">("off");
+  const [settingsPanel, setSettingsPanel] = useState<"off" | "list" | "auth-method" | "add-key">("off");
   const [settingsProvider, setSettingsProvider] = useState<string>("");
+  const [settingsCursor, setSettingsCursor] = useState(0);
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
@@ -129,16 +139,105 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // Settings panel
-    if (settingsPanel !== "off") {
-      if (key.escape) { setSettingsPanel("off"); setInput(""); return; }
+    if (settingsPanel !== "off" && settingsPanel !== "add-key") {
+      if (key.escape) {
+        if (settingsPanel === "list") { setSettingsPanel("off"); }
+        else { setSettingsPanel("list"); setSettingsCursor(0); }
+        return;
+      }
+      if (settingsPanel === "list") {
+        if (key.downArrow) { setSettingsCursor((i) => Math.min(i + 1, ALL_PROVIDERS.length - 1)); return; }
+        if (key.upArrow) { setSettingsCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          const selected = ALL_PROVIDERS[settingsCursor]!;
+          setSettingsProvider(selected.name);
+          if (selected.hasLogin) { setSettingsPanel("auth-method"); setSettingsCursor(0); }
+          else if (selected.name === "ollama") { setSettingsPanel("off"); }
+          else { setSettingsPanel("add-key"); setInput(""); }
+          return;
+        }
+      }
+      if (settingsPanel === "auth-method") {
+        if (key.downArrow) { setSettingsCursor((i) => Math.min(i + 1, 1)); return; }
+        if (key.upArrow) { setSettingsCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          if (settingsCursor === 1) { setSettingsPanel("add-key"); setInput(""); }
+          else {
+            // Login (cursor === 0)
+            const prov = settingsProvider;
+            setSettingsPanel("off");
+            setSettingsProvider("");
+            if (prov === "anthropic") {
+              import("./claude-auth.js").then(({ readClaudeAuth }) => readClaudeAuth()).then((auth) => {
+                if (auth && !auth.expired) {
+                  agent.getMulti().register("anthropic", auth.accessToken, "claude-sonnet-4-20250514");
+                  setEntries((c) => [...c, { role: "system", text: `Anthropic connected via Claude (${auth.subscriptionType ?? "login"})` }]);
+                } else {
+                  setEntries((c) => [...c, { role: "system", text: auth?.expired ? "Claude login expired. Run 'claude' to refresh." : "No Claude login found. Use API key." }]);
+                }
+              }).catch(() => setEntries((c) => [...c, { role: "system", text: "Failed to read Claude login." }]));
+            } else if (prov === "openai") {
+              import("./codex-auth.js").then(({ readCodexAuth }) => readCodexAuth()).then((auth) => {
+                if (auth) {
+                  agent.getMulti().register("openai", auth.accessToken, "gpt-5-mini");
+                  setEntries((c) => [...c, { role: "system", text: `OpenAI connected via Codex (${auth.authMode})` }]);
+                } else {
+                  setEntries((c) => [...c, { role: "system", text: "No Codex login found. Use API key." }]);
+                }
+              }).catch(() => setEntries((c) => [...c, { role: "system", text: "Failed to read Codex login." }]));
+            }
+          }
+          return;
+        }
+      }
+      return;
+    }
+    if (settingsPanel === "add-key") {
+      if (key.escape) { setSettingsPanel("list"); setInput(""); setSettingsCursor(0); return; }
       return;
     }
 
-    // Team panel — Escape goes back
-    if (teamPanel !== "off") {
-      if (key.escape) {
-        if (teamPanel === "list") { setTeamPanel("off"); }
-        else { setTeamPanel("list"); setInput(""); }
+    // Team panel
+    if (teamPanel === "list") {
+      if (key.escape) { setTeamPanel("off"); return; }
+      const teamMenuItems = 2;
+      if (key.downArrow) { setSettingsCursor((i) => Math.min(i + 1, teamMenuItems - 1)); return; }
+      if (key.upArrow) { setSettingsCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        if (settingsCursor === 0) { setTeamPanel("pick-role"); setSettingsCursor(0); }
+        else { setMode((m) => m === "solo" ? "team" : "solo"); setTeamPanel("off"); }
+        return;
+      }
+      return;
+    }
+    if (teamPanel === "pick-role") {
+      if (key.escape) { setTeamPanel("list"); setSettingsCursor(0); return; }
+      const roles = agent.getTeam().getRoles();
+      if (key.downArrow) { setSettingsCursor((i) => Math.min(i + 1, roles.length - 1)); return; }
+      if (key.upArrow) { setSettingsCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const role = roles[settingsCursor];
+        if (role) { setTeamEditRole(role.role); setTeamPanel("pick-provider"); setSettingsCursor(0); }
+        return;
+      }
+      return;
+    }
+    if (teamPanel === "pick-provider") {
+      if (key.escape) { setTeamPanel("pick-role"); setSettingsCursor(0); return; }
+      const providers = agent.getMulti().getRegistered();
+      if (key.downArrow) { setSettingsCursor((i) => Math.min(i + 1, providers.length - 1)); return; }
+      if (key.upArrow) { setSettingsCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const prov = providers[settingsCursor];
+        if (prov) {
+          const cfg = agent.getMulti().getProviderConfig(prov.name);
+          if (cfg) {
+            agent.getTeam().assignRole(teamEditRole as any, { provider: prov.name, model: prov.model, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl });
+            setEntries((c) => [...c, { role: "system", text: `${teamEditRole} → ${prov.name}/${prov.model}` }]);
+          }
+        }
+        setTeamPanel("off");
+        setSettingsCursor(0);
         return;
       }
       return;
@@ -150,6 +249,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         if (mcpMode === "list") { setMcpMode("off"); }
         else if (mcpMode === "remove") { setMcpMode("list"); }
         else { setMcpMode("list"); setInput(""); }
+        return;
+      }
+      if (mcpMode === "list") {
+        if (key.downArrow) { setMcpCursor((i) => Math.min(i + 1, 2)); return; }
+        if (key.upArrow) { setMcpCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          if (mcpCursor === 0) { setMcpMode("add-name"); setInput(""); }
+          else if (mcpCursor === 1 && mcpServers.length > 0) { setMcpMode("remove"); setMcpCursor(0); }
+          else { setMcpMode("off"); }
+          return;
+        }
         return;
       }
       if (mcpMode === "remove") {
@@ -197,14 +307,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       setInput("");
 
       // ── MCP mode submit flow (before busy/empty check) ──
-      if (mcpMode === "list") {
-        const cmd = line.toLowerCase();
-        if (cmd === "a" || cmd === "add") { setMcpMode("add-name"); return; }
-        if ((cmd === "r" || cmd === "remove") && mcpServers.length > 0) { setMcpMode("remove"); setMcpCursor(0); return; }
-        // b, back, q, empty, or anything else → go back
-        setMcpMode("off");
-        return;
-      }
       if (mcpMode === "remove") {
         const srv = mcpServers[mcpCursor];
         if (srv) {
@@ -246,86 +348,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       // ── Settings panel submit ──
-      if (settingsPanel === "list") {
-        const registered = agent.getMulti().getRegistered();
-        const num = parseInt(line, 10);
-        if (num >= 1 && num <= registered.length) {
-          setSettingsProvider(registered[num - 1]!.name);
-          setSettingsPanel("choose-auth");
-          setInput("");
-        } else if (line.toLowerCase() === "a" || line.toLowerCase() === "add") {
-          setSettingsPanel("add-key");
-          setSettingsProvider("");
-          setInput("");
-        } else {
-          setSettingsPanel("off");
-          setInput("");
-        }
-        return;
-      }
-      if (settingsPanel === "choose-auth") {
-        const choice = line.toLowerCase();
-        if (choice === "k" || choice === "key") {
-          setSettingsPanel("add-key");
-          setInput("");
-        } else if (choice === "l" || choice === "login") {
-          // Try to use existing login
-          let token: string | null = null;
-          let method = "";
-          if (settingsProvider === "anthropic") {
-            try {
-              const { readClaudeAuth } = await import("./claude-auth.js");
-              const auth = await readClaudeAuth();
-              if (auth && !auth.expired) { token = auth.accessToken; method = `Claude (${auth.subscriptionType ?? "login"})`; }
-              else if (auth?.expired) { setEntries((c) => [...c, { role: "system", text: "Claude login expired. Run 'claude' to refresh." }]); }
-            } catch {}
-          } else if (settingsProvider === "openai") {
-            try {
-              const { readCodexAuth } = await import("./codex-auth.js");
-              const auth = await readCodexAuth();
-              if (auth) { token = auth.accessToken; method = `Codex (${auth.authMode})`; }
-            } catch {}
-          }
-          if (token) {
-            const defaults: Record<string, string> = { anthropic: "claude-sonnet-4-20250514", openai: "gpt-5-mini" };
-            agent.getMulti().register(settingsProvider as any, token, defaults[settingsProvider] ?? "default");
-            setEntries((c) => [...c, { role: "system", text: `${settingsProvider} connected via ${method}` }]);
-          } else {
-            setEntries((c) => [...c, { role: "system", text: `No login found for ${settingsProvider}. Use API key instead.` }]);
-          }
-          setSettingsPanel("off");
-          setSettingsProvider("");
-          setInput("");
-        } else {
-          setSettingsPanel("list");
-          setInput("");
-        }
-        return;
-      }
       if (settingsPanel === "add-key") {
-        if (!settingsProvider) {
-          const validProviders = ["anthropic", "openai", "gemini", "groq", "openrouter"];
-          if (validProviders.includes(line.toLowerCase())) {
-            setSettingsProvider(line.toLowerCase());
-            setSettingsPanel("choose-auth");
-            setInput("");
-          } else {
-            setSettingsPanel("list");
-            setInput("");
-          }
-          return;
-        }
-        // User typed API key
         if (line.trim()) {
-          // Save credential
-          const { promises: fsPromises } = await import("node:fs");
-          const credPath = (await import("node:path")).join((await import("node:os")).homedir(), ".cats-claw", "credentials.json");
+          const { promises: fsp } = await import("node:fs");
+          const p = await import("node:path");
+          const o = await import("node:os");
+          const credPath = p.join(o.homedir(), ".cats-claw", "credentials.json");
           let creds: Record<string, any> = {};
-          try { creds = JSON.parse(await fsPromises.readFile(credPath, "utf8")); } catch {}
-          creds[settingsProvider] = { apiKey: line.trim(), model: undefined };
-          await fsPromises.mkdir((await import("node:path")).dirname(credPath), { recursive: true });
-          await fsPromises.writeFile(credPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
-          // Register with multi-provider
+          try { creds = JSON.parse(await fsp.readFile(credPath, "utf8")); } catch {}
+          creds[settingsProvider] = { apiKey: line.trim() };
+          await fsp.mkdir(p.dirname(credPath), { recursive: true });
+          await fsp.writeFile(credPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
           const defaults: Record<string, string> = { anthropic: "claude-sonnet-4-20250514", openai: "gpt-5-mini", gemini: "gemini-2.5-flash", groq: "openai/gpt-oss-20b", openrouter: "anthropic/claude-sonnet-4" };
           agent.getMulti().register(settingsProvider as any, line.trim(), defaults[settingsProvider] ?? "default");
           setEntries((c) => [...c, { role: "system", text: `${settingsProvider} configured and saved.` }]);
@@ -334,46 +367,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setSettingsProvider("");
         setInput("");
         return;
-      }
-
-      // ── Team panel submit flow ──
-      if (teamPanel === "list") {
-        const cmd = line.toLowerCase();
-        if (cmd === "e" || cmd === "edit") { setTeamPanel("pick-role"); setInput(""); return; }
-        if (cmd === "t" || cmd === "toggle") {
-          setMode((m) => m === "solo" ? "team" : "solo");
-          setTeamPanel("off"); setInput(""); return;
-        }
-        setTeamPanel("off"); setInput(""); return;
-      }
-      if (teamPanel === "pick-role") {
-        const roles = ["planner", "coder", "reviewer", "tester", "optimizer"];
-        if (roles.includes(line.toLowerCase())) {
-          setTeamEditRole(line.toLowerCase());
-          setTeamPanel("pick-provider"); setInput(""); return;
-        }
-        setTeamPanel("list"); setInput(""); return;
-      }
-      if (teamPanel === "pick-provider") {
-        const prov = line.toLowerCase();
-        if (agent.getMulti().isRegistered(prov as any)) {
-          setTeamEditProvider(prov);
-          setTeamPanel("pick-model"); setInput(""); return;
-        }
-        setTeamPanel("list"); setInput(""); return;
-      }
-      if (teamPanel === "pick-model") {
-        const modelName = line.trim();
-        const cfg = agent.getMulti().getProviderConfig(teamEditProvider as any);
-        if (cfg) {
-          agent.getTeam().assignRole(teamEditRole as any, {
-            provider: teamEditProvider as any,
-            model: modelName || cfg.model,
-            apiKey: cfg.apiKey,
-            baseUrl: cfg.baseUrl,
-          });
-        }
-        setTeamPanel("list"); setInput(""); return;
       }
 
       // ── Normal mode: skip empty/busy ──
@@ -748,7 +741,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, teamEditProvider, settingsPanel, settingsProvider],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor],
   );
 
   const providerLabel = PROVIDER_LABELS[options.provider] ?? options.provider;
@@ -815,54 +808,52 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
           {settingsPanel === "list" ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text color="gray" italic>Registered providers:</Text>
-              {agent.getMulti().getRegistered().map((p, i) => (
-                <Box key={p.name}>
-                  <Text color={p.name === agent.getActiveProvider() ? "#ff9c73" : "#ffb088"} bold>
-                    {`  ${i + 1}. `}
+              {ALL_PROVIDERS.map((p, i) => {
+                const isRegistered = agent.getMulti().isRegistered(p.name);
+                return (
+                  <Box key={p.name}>
+                    <Text color={i === settingsCursor ? "#ff9c73" : "gray"} bold={i === settingsCursor}>
+                      {i === settingsCursor ? " > " : "   "}
+                    </Text>
+                    <Text color={isRegistered ? "green" : "gray"}>{isRegistered ? "● " : "○ "}</Text>
+                    <Text color={i === settingsCursor ? "#ff9c73" : (isRegistered ? "#ffb088" : "gray")}>
+                      {p.label}
+                    </Text>
+                    {p.name === agent.getActiveProvider() ? <Text color="green"> (active)</Text> : null}
+                  </Box>
+                );
+              })}
+              <Box marginTop={1}><Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text></Box>
+            </Box>
+          ) : null}
+
+          {settingsPanel === "auth-method" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray">Configure: <Text bold color="#ffb088">{settingsProvider}</Text></Text>
+              <Box marginTop={1} flexDirection="column">
+                <Box>
+                  <Text color={settingsCursor === 0 ? "#ff9c73" : "gray"} bold={settingsCursor === 0}>
+                    {settingsCursor === 0 ? " > " : "   "}
                   </Text>
-                  <Text color={p.name === agent.getActiveProvider() ? "#ff9c73" : "gray"}>
-                    {`${p.name} — ${p.model}`}
+                  <Text color={settingsCursor === 0 ? "#ff9c73" : "gray"}>
+                    Use {settingsProvider === "anthropic" ? "Claude Code" : "Codex"} login
                   </Text>
-                  <Text color="green">{p.name === agent.getActiveProvider() ? " (active)" : ""}</Text>
                 </Box>
-              ))}
-              <Box marginTop={1} flexDirection="column">
-                <Text color="#cc8866">Type number + Enter to edit key</Text>
-                <Text color="#cc8866">Type <Text bold>a</Text> + Enter to add new provider</Text>
-                <Text color="#cc8866">Press Enter or Esc to go back</Text>
+                <Box>
+                  <Text color={settingsCursor === 1 ? "#ff9c73" : "gray"} bold={settingsCursor === 1}>
+                    {settingsCursor === 1 ? " > " : "   "}
+                  </Text>
+                  <Text color={settingsCursor === 1 ? "#ff9c73" : "gray"}>Enter API key manually</Text>
+                </Box>
               </Box>
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
             </Box>
           ) : null}
 
-          {settingsPanel === "choose-auth" ? (
+          {settingsPanel === "add-key" ? (
             <Box flexDirection="column" marginTop={1}>
               <Text color="gray">Provider: <Text bold color="#ffb088">{settingsProvider}</Text></Text>
-              <Box marginTop={1} flexDirection="column">
-                {(settingsProvider === "anthropic" || settingsProvider === "openai") ? (
-                  <>
-                    <Text color="#cc8866">Type <Text bold>l</Text> + Enter → use {settingsProvider === "anthropic" ? "Claude Code" : "Codex"} login</Text>
-                    <Text color="#cc8866">Type <Text bold>k</Text> + Enter → enter API key manually</Text>
-                  </>
-                ) : (
-                  <Text color="#cc8866">Type <Text bold>k</Text> + Enter → enter API key</Text>
-                )}
-                <Text color="#cc8866">Enter or Esc to go back</Text>
-              </Box>
-            </Box>
-          ) : null}
-
-          {settingsPanel === "add-key" && !settingsProvider ? (
-            <Box flexDirection="column" marginTop={1}>
-              <Text color="#cc8866">Type provider name + Enter:</Text>
-              <Text color="gray">  anthropic / openai / gemini / groq / openrouter</Text>
-            </Box>
-          ) : null}
-
-          {settingsPanel === "add-key" && settingsProvider ? (
-            <Box flexDirection="column" marginTop={1}>
-              <Text color="gray">Provider: <Text bold color="#ffb088">{settingsProvider}</Text></Text>
-              <Text color="#cc8866">Paste API key + Enter (empty to cancel):</Text>
+              <Text color="#cc8866">Paste API key + Enter (Esc to cancel):</Text>
             </Box>
           ) : null}
         </Box>
@@ -882,28 +873,48 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                 </Box>
               ))}
               <Box marginTop={1} flexDirection="column">
-                <Text color="#cc8866">Type: <Text bold>e</Text>(dit role) / <Text bold>t</Text>(oggle mode) / Enter(back)</Text>
+                {["Edit role assignment", `Toggle mode (${mode === "solo" ? "→ team" : "→ solo"})`].map((label, i) => (
+                  <Box key={label}>
+                    <Text color={i === settingsCursor ? "#ff9c73" : "gray"} bold={i === settingsCursor}>
+                      {i === settingsCursor ? " > " : "   "}
+                    </Text>
+                    <Text color={i === settingsCursor ? "#ff9c73" : "gray"}>{label}</Text>
+                  </Box>
+                ))}
               </Box>
+              <Text color="gray" italic>{"  ↑↓ navigate  Enter select  Esc back"}</Text>
             </Box>
           ) : null}
 
           {teamPanel === "pick-role" ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text color="#cc8866">Which role to edit? (planner/coder/reviewer/tester/optimizer):</Text>
+              <Text color="gray" italic>Select role to reassign:</Text>
+              {agent.getTeam().getRoles().map((r, i) => (
+                <Box key={r.role}>
+                  <Text color={i === settingsCursor ? "#ff9c73" : "gray"} bold={i === settingsCursor}>
+                    {i === settingsCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === settingsCursor ? "#ff9c73" : "gray"}>
+                    {`${r.role} (${r.provider}/${r.model})`}
+                  </Text>
+                </Box>
+              ))}
+              <Text color="gray" italic>{"  ↑↓ navigate  Enter select  Esc back"}</Text>
             </Box>
           ) : null}
 
           {teamPanel === "pick-provider" ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text color="gray">Role: <Text bold color="#ffb088">{teamEditRole}</Text></Text>
-              <Text color="#cc8866">Provider ({agent.getMulti().getRegistered().map((p) => p.name).join("/")}): </Text>
-            </Box>
-          ) : null}
-
-          {teamPanel === "pick-model" ? (
-            <Box flexDirection="column" marginTop={1}>
-              <Text color="gray">Role: <Text bold color="#ffb088">{teamEditRole}</Text> → {teamEditProvider}</Text>
-              <Text color="#cc8866">Model (Enter for default):</Text>
+              <Text color="gray">Assign <Text bold color="#ffb088">{teamEditRole}</Text> to:</Text>
+              {agent.getMulti().getRegistered().map((p, i) => (
+                <Box key={p.name}>
+                  <Text color={i === settingsCursor ? "#ff9c73" : "gray"} bold={i === settingsCursor}>
+                    {i === settingsCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === settingsCursor ? "#ff9c73" : "gray"}>{`${p.name} / ${p.model}`}</Text>
+                </Box>
+              ))}
+              <Text color="gray" italic>{"  ↑↓ navigate  Enter select  Esc back"}</Text>
             </Box>
           ) : null}
         </Box>
@@ -918,17 +929,25 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               {mcpServers.length === 0 ? (
                 <Text color="gray" italic>No MCP servers configured.</Text>
               ) : (
-                mcpServers.map((s, i) => (
+                mcpServers.map((s) => (
                   <Box key={s.name}>
-                    <Text color={s.connected ? "green" : "red"}>{s.connected ? " + " : " x "}</Text>
+                    <Text color={s.connected ? "green" : "red"}>{s.connected ? " ● " : " ○ "}</Text>
                     <Text color="#ffb088" bold>{s.name}</Text>
                     <Text color="gray"> — {s.command ?? "?"} — {s.toolCount} tool(s)</Text>
                   </Box>
                 ))
               )}
               <Box marginTop={1} flexDirection="column">
-                <Text color="#cc8866">Type: <Text bold>a</Text>(dd) / <Text bold>r</Text>(emove) / <Text bold>b</Text>(ack) then Enter</Text>
+                {["Add server", "Remove server", "Back"].map((label, i) => (
+                  <Box key={label}>
+                    <Text color={i === mcpCursor ? "#ff9c73" : "gray"} bold={i === mcpCursor}>
+                      {i === mcpCursor ? " > " : "   "}
+                    </Text>
+                    <Text color={i === mcpCursor ? "#ff9c73" : "gray"}>{label}</Text>
+                  </Box>
+                ))}
               </Box>
+              <Text color="gray" italic>{"  ↑↓ navigate  Enter select  Esc back"}</Text>
             </Box>
           ) : null}
 
