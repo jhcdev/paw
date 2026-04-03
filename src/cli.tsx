@@ -456,18 +456,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const result = await agent.getTeam().run(teamPrompt, (phase, provider, model) => {
             setThinkMsg(`${phase} (${provider}/${model})...`);
           });
-          const output = [
-            `--- PLAN (${result.plan.provider}/${result.plan.model}, ${result.plan.ms}ms) ---`,
-            result.plan.text,
-            "",
-            `--- IMPLEMENTATION (${result.implementation.provider}/${result.implementation.model}, ${result.implementation.ms}ms) ---`,
-            result.implementation.text,
-            "",
-            `--- REVIEW (${result.review.provider}/${result.review.model}, ${result.review.ms}ms) ---`,
-            result.review.text,
-            "",
-            `Total: ${result.totalMs}ms`,
-          ].join("\n");
+          const output = result.phases.map((p) =>
+            `--- ${p.role.toUpperCase()} (${p.provider}/${p.model}, ${p.ms}ms) ---\n${p.text}`
+          ).join("\n\n") + `\n\nTotal: ${result.totalMs}ms`;
           setEntries((c) => [...c, { role: "assistant", text: output }]);
         } catch (err) {
           setEntries((c) => [...c, { role: "system", text: `Team error: ${err instanceof Error ? err.message : String(err)}` }]);
