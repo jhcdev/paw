@@ -55,6 +55,21 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+const COMMANDS: { name: string; desc: string }[] = [
+  { name: "/help", desc: "show all commands" },
+  { name: "/tools", desc: "available tools" },
+  { name: "/mcp", desc: "MCP server status" },
+  { name: "/model", desc: "current model info" },
+  { name: "/cost", desc: "token usage" },
+  { name: "/git", desc: "git status" },
+  { name: "/diff", desc: "git diff" },
+  { name: "/log", desc: "recent commits" },
+  { name: "/history", desc: "export conversation" },
+  { name: "/compact", desc: "compress conversation" },
+  { name: "/clear", desc: "reset chat" },
+  { name: "/exit", desc: "quit" },
+];
+
 function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions }) {
   const { exit } = useApp();
   const [entries, setEntries] = useState<ChatEntry[]>([
@@ -64,10 +79,34 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [isBusy, setIsBusy] = useState(false);
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
   const [turnCount, setTurnCount] = useState(0);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+
+  const suggestions = useMemo(() => {
+    if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
+    const q = input.toLowerCase();
+    return COMMANDS.filter((c) => c.name.startsWith(q));
+  }, [input, isBusy]);
 
   useInput((ch, key) => {
     if (key.escape && !isBusy) exit();
     if (key.ctrl && ch === "c") exit();
+
+    if (suggestions.length > 0) {
+      if (key.downArrow) {
+        setSelectedIdx((i) => Math.min(i + 1, suggestions.length - 1));
+        return;
+      }
+      if (key.upArrow) {
+        setSelectedIdx((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (key.tab) {
+        const selected = suggestions[selectedIdx];
+        if (selected) setInput(selected.name);
+        setSelectedIdx(0);
+        return;
+      }
+    }
   });
 
   const sidebarLines = useMemo(
@@ -349,9 +388,26 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         </Box>
       ) : null}
 
+      {suggestions.length > 0 ? (
+        <Box flexDirection="column" paddingX={2} marginBottom={0}>
+          {suggestions.map((cmd, i) => (
+            <Box key={cmd.name}>
+              <Text color={i === selectedIdx ? "#ff9c73" : "gray"} bold={i === selectedIdx}>
+                {i === selectedIdx ? " > " : "   "}
+              </Text>
+              <Text color={i === selectedIdx ? "#ff9c73" : "gray"} bold={i === selectedIdx}>
+                {cmd.name}
+              </Text>
+              <Text color="gray"> — {cmd.desc}</Text>
+            </Box>
+          ))}
+          <Text color="gray" italic>  Tab to complete | arrows to navigate</Text>
+        </Box>
+      ) : null}
+
       <Box borderStyle="round" borderColor="#d97757" paddingX={1}>
         <Text color="#ff9c73" bold>{" > "}</Text>
-        <TextInput value={input} onChange={setInput} onSubmit={submit} />
+        <TextInput value={input} onChange={(v) => { setInput(v); setSelectedIdx(0); }} onSubmit={submit} />
       </Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
     </Box>
