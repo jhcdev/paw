@@ -127,6 +127,17 @@ export async function detectProviders(env: Record<string, string | undefined>): 
   };
 
   check("anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "claude-sonnet-4-20250514");
+
+  // Claude login fallback for Anthropic
+  if (!found.some((p) => p.provider === "anthropic")) {
+    try {
+      const { readClaudeAuth } = await import("./claude-auth.js");
+      const claude = await readClaudeAuth();
+      if (claude && !claude.expired) {
+        found.push({ provider: "anthropic", apiKey: claude.accessToken, model: env.ANTHROPIC_MODEL?.trim() || "claude-sonnet-4-20250514" });
+      }
+    } catch {}
+  }
   check("openai", "OPENAI_API_KEY", "OPENAI_MODEL", "gpt-5-mini");
 
   // Codex login fallback for OpenAI
