@@ -31,10 +31,19 @@ const CONFIG_PATHS = [
   ".cats-claw/mcp.json",
 ];
 
+export type McpServerEntry = {
+  name: string;
+  config: McpServerConfig;
+  connected: boolean;
+  toolCount: number;
+};
+
 export class McpManager {
   private servers: ConnectedServer[] = [];
+  private cwd: string = "";
 
   async loadAndConnect(cwd: string): Promise<void> {
+    this.cwd = cwd;
     const config = await this.findConfig(cwd);
     if (!config?.mcpServers) return;
 
@@ -195,5 +204,72 @@ export class McpManager {
     process.stdout.write(`${pc.green("  +")} ${pc.cyan(name)} — ${tools.length} tool(s)\n`);
 
     this.servers.push({ name, client, transport, tools });
+  }
+
+  async getFullStatus(): Promise<McpServerEntry[]> {
+    const config = await this.findConfig(this.cwd);
+    const configServers = config?.mcpServers ?? {};
+    const entries: McpServerEntry[] = [];
+
+    for (const [name, cfg] of Object.entries(configServers)) {
+      const connected = this.servers.some((s) => s.name === name);
+      const server = this.servers.find((s) => s.name === name);
+      entries.push({
+        name,
+        config: cfg,
+        connected,
+        toolCount: server?.tools.length ?? 0,
+      });
+    }
+    return entries;
+  }
+
+  private getConfigFilePath(): string {
+    return path.join(this.cwd, ".mcp.json");
+  }
+
+  async readConfigFile(): Promise<McpConfigFile> {
+    const filePath = this.getConfigFilePath();
+    try {
+      const raw = await fs.readFile(filePath, "utf8");
+      return JSON.parse(raw) as McpConfigFile;
+    } catch {
+      return { mcpServers: {} };
+    }
+  }
+
+  async writeConfigFile(config: McpConfigFile): Promise<void> {
+    const filePath = this.getConfigFilePath();
+    await fs.writeFile(filePath, JSON.stringify(config, null, 2), "utf8");
+  }
+
+  async addServer(name: string, config: McpServerConfig): Promise<void> {
+    const file = await this.readConfigFile();
+    if (!file.mcpServers) file.mcpServers = {};
+    file.mcpServers[name] = config;
+    await this.writeConfigFile(file);
+    // Try to connect immediately
+    try {
+      await this.connectServer(name, config, this.cwd);
+      const defs = this.getToolDefinitions();
+      const handlers = this.getToolHandlers();
+    } catch {
+      // Will show as disconnected
+    }
+  }
+
+  async removeServer(name: string): Promise<void> {
+    // Disconnect if connected
+    const idx = this.servers.findIndex((s) => s.name === name);
+    if (idx >= 0) {
+      try { await this.servers[idx]!.client.close(); } catch {}
+      this.servers.splice(idx, 1);
+    }
+    // Remove from config
+    const file = await this.readConfigFile();
+    if (file.mcpServers) {
+      delete file.mcpServers[name];
+      await this.writeConfigFile(file);
+    }
   }
 }

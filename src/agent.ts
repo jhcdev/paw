@@ -1,4 +1,4 @@
-import { McpManager } from "./mcp.js";
+import { McpManager, type McpServerEntry } from "./mcp.js";
 import { createProvider } from "./providers/index.js";
 import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage } from "./types.js";
 
@@ -46,6 +46,24 @@ export class CodingAgent {
 
   getMcpTools(): ToolDefinition[] {
     return this.mcpManager.getToolDefinitions();
+  }
+
+  async getMcpFullStatus(): Promise<McpServerEntry[]> {
+    return this.mcpManager.getFullStatus();
+  }
+
+  async addMcpServer(name: string, config: { command: string; args?: string[]; env?: Record<string, string> }): Promise<void> {
+    await this.mcpManager.addServer(name, config);
+    // Re-inject tools
+    const defs = this.mcpManager.getToolDefinitions();
+    const handlers = this.mcpManager.getToolHandlers();
+    if (defs.length > 0 && "addExternalTools" in this.provider) {
+      (this.provider as LlmProviderWithExternalTools).addExternalTools(defs, handlers);
+    }
+  }
+
+  async removeMcpServer(name: string): Promise<void> {
+    await this.mcpManager.removeServer(name);
   }
 
   async shutdown(): Promise<void> {

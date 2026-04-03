@@ -80,6 +80,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
   const [turnCount, setTurnCount] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [mcpMode, setMcpMode] = useState<"off" | "list" | "add-name" | "add-cmd" | "add-args" | "remove">("off");
+  const [mcpServers, setMcpServers] = useState<{ name: string; connected: boolean; toolCount: number; command?: string }[]>([]);
+  const [mcpCursor, setMcpCursor] = useState(0);
+  const [mcpAddName, setMcpAddName] = useState("");
+  const [mcpAddCmd, setMcpAddCmd] = useState("");
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
@@ -88,10 +93,38 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   }, [input, isBusy]);
 
   useInput((ch, key) => {
-    if (key.escape && !isBusy) exit();
     if (key.ctrl && ch === "c") exit();
 
-    if (suggestions.length > 0) {
+    // MCP mode keys
+    if (mcpMode === "list") {
+      if (key.escape || ch === "b" || ch === "q") { setMcpMode("off"); return; }
+      if (ch === "a") { setMcpMode("add-name"); setMcpAddName(""); setInput(""); return; }
+      if (ch === "r" && mcpServers.length > 0) { setMcpMode("remove"); setMcpCursor(0); return; }
+      return;
+    }
+    if (mcpMode === "remove") {
+      if (key.escape) { setMcpMode("list"); return; }
+      if (key.downArrow) { setMcpCursor((i) => Math.min(i + 1, mcpServers.length - 1)); return; }
+      if (key.upArrow) { setMcpCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const srv = mcpServers[mcpCursor];
+        if (srv) {
+          agent.removeMcpServer(srv.name).then(() => {
+            agent.getMcpFullStatus().then((list) => {
+              setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
+              setMcpCursor(0);
+              setMcpMode("list");
+            });
+          });
+        }
+        return;
+      }
+      return;
+    }
+
+    if (key.escape && !isBusy) exit();
+
+    if (suggestions.length > 0 && mcpMode === "off") {
       if (key.downArrow) {
         setSelectedIdx((i) => Math.min(i + 1, suggestions.length - 1));
         return;
@@ -126,6 +159,33 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       const line = value.trim();
       if (!line || isBusy) return;
       setInput("");
+
+      // ── MCP add flow ──
+      if (mcpMode === "add-name") {
+        if (!line) { setMcpMode("list"); return; }
+        setMcpAddName(line);
+        setMcpMode("add-cmd");
+        setInput("");
+        return;
+      }
+      if (mcpMode === "add-cmd") {
+        if (!line) { setMcpMode("list"); return; }
+        setMcpAddCmd(line);
+        setMcpMode("add-args");
+        setInput("");
+        return;
+      }
+      if (mcpMode === "add-args") {
+        const args = line ? line.split(/\s+/) : [];
+        try {
+          await agent.addMcpServer(mcpAddName, { command: mcpAddCmd, args });
+        } catch {}
+        const list = await agent.getMcpFullStatus();
+        setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
+        setMcpMode("list");
+        setInput("");
+        return;
+      }
 
       // ── exit ──
       if (line === "/exit" || line === "/quit") { exit(); return; }
@@ -163,23 +223,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       // ── mcp ──
       if (line === "/mcp") {
-        const servers = agent.getMcpStatus();
-        if (servers.length === 0) {
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: "No MCP servers connected.\n\nCreate .mcp.json in the project root:\n\n  {\n    \"mcpServers\": {\n      \"name\": {\n        \"command\": \"npx\",\n        \"args\": [\"-y\", \"@modelcontextprotocol/server-xxx\"]\n      }\n    }\n  }\n\nThen restart." },
-          ]);
-        } else {
-          const mcpTools = agent.getMcpTools();
-          const serverList = servers.map((s) => `  ${s.name} — ${s.toolCount} tool(s)`).join("\n");
-          const toolList = mcpTools.length > 0
-            ? "\n\nMCP Tools:\n" + mcpTools.map((t) => `  ${t.name} - ${t.description}`).join("\n")
-            : "";
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: `MCP Servers (${servers.length}):\n${serverList}${toolList}` },
-          ]);
-        }
+        const list = await agent.getMcpFullStatus();
+        setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
+        setMcpCursor(0);
+        setMcpMode("list");
         return;
       }
 
@@ -388,7 +435,62 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         </Box>
       ) : null}
 
-      {suggestions.length > 0 ? (
+      {mcpMode !== "off" ? (
+        <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+          <Text color="#ff9c73" bold>MCP Server Manager</Text>
+
+          {mcpMode === "list" ? (
+            <Box flexDirection="column" marginTop={1}>
+              {mcpServers.length === 0 ? (
+                <Text color="gray" italic>No MCP servers configured.</Text>
+              ) : (
+                mcpServers.map((s, i) => (
+                  <Box key={s.name}>
+                    <Text color={s.connected ? "green" : "red"}>{s.connected ? " + " : " x "}</Text>
+                    <Text color="#ffb088" bold>{s.name}</Text>
+                    <Text color="gray"> — {s.command ?? "?"} — {s.toolCount} tool(s)</Text>
+                  </Box>
+                ))
+              )}
+              <Box marginTop={1} flexDirection="column">
+                <Text color="#cc8866">[a] Add server  [r] Remove server  [b] Back</Text>
+              </Box>
+            </Box>
+          ) : null}
+
+          {mcpMode === "remove" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select server to remove (Enter to confirm, Esc to cancel):</Text>
+              {mcpServers.map((s, i) => (
+                <Box key={s.name}>
+                  <Text color={i === mcpCursor ? "#ff9c73" : "gray"} bold={i === mcpCursor}>
+                    {i === mcpCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === mcpCursor ? "#ff9c73" : "gray"}>{s.name}</Text>
+                </Box>
+              ))}
+            </Box>
+          ) : null}
+
+          {mcpMode === "add-name" ? (
+            <Box marginTop={1}><Text color="#cc8866">Server name (Enter to confirm, empty to cancel):</Text></Box>
+          ) : null}
+          {mcpMode === "add-cmd" ? (
+            <Box marginTop={1} flexDirection="column">
+              <Text color="gray">Adding: <Text bold color="#ffb088">{mcpAddName}</Text></Text>
+              <Text color="#cc8866">Command (e.g. npx):</Text>
+            </Box>
+          ) : null}
+          {mcpMode === "add-args" ? (
+            <Box marginTop={1} flexDirection="column">
+              <Text color="gray">Adding: <Text bold color="#ffb088">{mcpAddName}</Text> ({mcpAddCmd})</Text>
+              <Text color="#cc8866">Args (space-separated, e.g. -y @modelcontextprotocol/server-github):</Text>
+            </Box>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {suggestions.length > 0 && mcpMode === "off" ? (
         <Box flexDirection="column" paddingX={2} marginBottom={0}>
           {suggestions.map((cmd, i) => (
             <Box key={cmd.name}>
