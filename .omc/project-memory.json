@@ -122,8 +122,8 @@
   "hotPaths": [
     {
       "path": "src/cli.tsx",
-      "accessCount": 18,
-      "lastAccessed": 1775223473585,
+      "accessCount": 24,
+      "lastAccessed": 1775223632917,
       "type": "directory"
     },
     {

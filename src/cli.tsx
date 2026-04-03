@@ -110,6 +110,28 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [modelCursor, setModelCursor] = useState(0);
   const [providerVersion, setProviderVersion] = useState(0);
 
+  // Raw stdin handler for smooth character input (especially Korean IME)
+  const { stdin } = useStdin();
+  React.useEffect(() => {
+    if (!stdin) return;
+    const handler = (data: Buffer) => {
+      const s = data.toString("utf8");
+      // Skip control characters handled by useInput (arrows, escape, ctrl+*, etc.)
+      if (s === "\r" || s === "\n") return; // Enter — handled by useInput
+      if (s === "\x7f" || s === "\b") return; // Backspace — handled by useInput
+      if (s.charCodeAt(0) < 32 && s.charCodeAt(0) !== 9) return; // Control chars
+      if (s.startsWith("\x1b")) return; // Escape sequences (arrows etc.)
+      // Regular text input
+      setInput((prev) => {
+        const next = prev + s;
+        if (next.startsWith("/")) setSelectedIdx(0);
+        return next;
+      });
+    };
+    stdin.on("data", handler);
+    return () => { stdin.off("data", handler); };
+  }, [stdin]);
+
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
     const q = input.toLowerCase();
@@ -372,15 +394,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return chars.join("");
       });
       return;
-    }
-
-    // Regular character input (including Korean/CJK)
-    if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
-      setInput((prev) => {
-        const next = prev + ch;
-        if (next.startsWith("/")) setSelectedIdx(0);
-        return next;
-      });
     }
   });
 
