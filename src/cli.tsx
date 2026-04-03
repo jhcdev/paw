@@ -171,20 +171,18 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const submit = useCallback(
     async (value: string) => {
       const line = value.trim();
-      if (!line || isBusy) return;
       setInput("");
 
-      // ── MCP mode submit flow ──
+      // ── MCP mode submit flow (before busy/empty check) ──
       if (mcpMode === "list") {
         const cmd = line.toLowerCase();
-        if (cmd === "a" || cmd === "add") { setMcpMode("add-name"); setInput(""); return; }
-        if ((cmd === "r" || cmd === "remove") && mcpServers.length > 0) { setMcpMode("remove"); setMcpCursor(0); setInput(""); return; }
-        if (cmd === "b" || cmd === "back" || cmd === "q" || !line) { setMcpMode("off"); setInput(""); return; }
-        setInput("");
+        if (cmd === "a" || cmd === "add") { setMcpMode("add-name"); return; }
+        if ((cmd === "r" || cmd === "remove") && mcpServers.length > 0) { setMcpMode("remove"); setMcpCursor(0); return; }
+        // b, back, q, empty, or anything else → go back
+        setMcpMode("off");
         return;
       }
       if (mcpMode === "remove") {
-        // Enter to confirm removal
         const srv = mcpServers[mcpCursor];
         if (srv) {
           await agent.removeMcpServer(srv.name);
@@ -193,21 +191,18 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setMcpCursor(0);
         }
         setMcpMode("list");
-        setInput("");
         return;
       }
       if (mcpMode === "add-name") {
         if (!line) { setMcpMode("list"); return; }
         setMcpAddName(line);
         setMcpMode("add-cmd");
-        setInput("");
         return;
       }
       if (mcpMode === "add-cmd") {
         if (!line) { setMcpMode("list"); return; }
         setMcpAddCmd(line);
         setMcpMode("add-args");
-        setInput("");
         return;
       }
       if (mcpMode === "add-args") {
@@ -218,9 +213,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const list = await agent.getMcpFullStatus();
         setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
         setMcpMode("list");
-        setInput("");
         return;
       }
+
+      // ── Normal mode: skip empty/busy ──
+      if (!line || isBusy) return;
 
       // ── exit ──
       if (line === "/exit" || line === "/quit") { exit(); return; }
@@ -491,7 +488,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd],
   );
 
   const providerLabel = PROVIDER_LABELS[options.provider] ?? options.provider;
