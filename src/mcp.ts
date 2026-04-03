@@ -104,6 +104,14 @@ export class McpManager {
     return handlers;
   }
 
+  getStatus(): { name: string; toolCount: number }[] {
+    return this.servers.map((s) => ({ name: s.name, toolCount: s.tools.length }));
+  }
+
+  getConfigPaths(): string[] {
+    return [...CONFIG_PATHS];
+  }
+
   async disconnect(): Promise<void> {
     for (const server of this.servers) {
       try {

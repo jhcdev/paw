@@ -32,6 +32,14 @@ export class CodingAgent {
     return this.provider.runTurn(prompt);
   }
 
+  getMcpStatus(): { name: string; toolCount: number }[] {
+    return this.mcpManager.getStatus();
+  }
+
+  getMcpTools(): ToolDefinition[] {
+    return this.mcpManager.getToolDefinitions();
+  }
+
   async shutdown(): Promise<void> {
     await this.mcpManager.disconnect();
   }

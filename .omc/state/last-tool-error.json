@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"GH_TOKEN=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 gh repo delete jhcdev/onyx-coder --yes 2>&1\",\"description\":\"Delete onyx-coder repo\"}",
+  "error": "Exit code 1\nHTTP 404: Not Found (https://api.github.com/repos/jhcdev/onyx-coder)",
+  "timestamp": "2026-04-03T06:50:06.177Z",
+  "retry_count": 1
+}

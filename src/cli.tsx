@@ -63,6 +63,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       "",
       "  Type naturally to chat.",
       "  /tools  - available tools",
+      "  /mcp    - MCP servers",
       "  /clear  - fresh start",
       "  /exit   - bye bye~",
       "",
@@ -88,8 +89,30 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (line === "/help") {
         setEntries((c) => [...c,
           { role: "user", text: line },
-          { role: "system", text: "  /help   - this menu\n  /tools  - available tools\n  /clear  - reset chat\n  /exit   - quit" },
+          { role: "system", text: "  /help   - this menu\n  /tools  - available tools\n  /mcp    - MCP server status\n  /clear  - reset chat\n  /exit   - quit" },
         ]);
+        return;
+      }
+
+      if (line === "/mcp") {
+        const servers = agent.getMcpStatus();
+        if (servers.length === 0) {
+          const mcpTools = agent.getMcpTools();
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: "No MCP servers connected.\n\nTo add MCP servers, create .mcp.json in the project root:\n\n  {\n    \"mcpServers\": {\n      \"name\": {\n        \"command\": \"npx\",\n        \"args\": [\"-y\", \"@modelcontextprotocol/server-xxx\"]\n      }\n    }\n  }\n\nThen restart Cat's Claw." },
+          ]);
+        } else {
+          const mcpTools = agent.getMcpTools();
+          const serverList = servers.map((s) => `  ${s.name} — ${s.toolCount} tool(s)`).join("\n");
+          const toolList = mcpTools.length > 0
+            ? "\n\nMCP Tools:\n" + mcpTools.map((t) => `  ${t.name} - ${t.description}`).join("\n")
+            : "";
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: `MCP Servers (${servers.length}):\n${serverList}${toolList}` },
+          ]);
+        }
         return;
       }
 
