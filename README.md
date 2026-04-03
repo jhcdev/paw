@@ -6,7 +6,9 @@
   > ^ <
 ```
 
-Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, auto-login, and automatic fallback.
+Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, and automatic fallback.
+
+> **Disclaimer:** Cat's Claw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, Google, Groq, or OpenRouter. Claude, GPT, Gemini, and related names are trademarks of their respective owners.
 
 ## Architecture Flow
 
@@ -21,8 +23,6 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                                   ┌─────┴─────┐
                                   │  Login     │
                                   │  ┌────────┐│
-                                  │  │Claude  ││  ~/.claude/.credentials.json
-                                  │  │Codex   ││  ~/.codex/auth.json
                                   │  │API Key ││  ~/.cats-claw/credentials.json
                                   │  │.env    ││  .env
                                   │  └────────┘│
@@ -103,7 +103,6 @@ Provider API Call
 ## Features
 
 - **Multi-provider** — Anthropic, OpenAI, Gemini, Groq, OpenRouter, Ollama
-- **Auto-login** — Reuse Claude (`~/.claude/.credentials.json`) and Codex (`~/.codex/auth.json`) sessions
 - **Solo/Team mode** — Single provider or 5-agent collaboration pipeline in one terminal
 - **MCP support** — Connect external tools via Model Context Protocol (stdio/http/sse)
 - **Auto-fallback** — Rate limit or quota error? Automatically tries next provider
@@ -123,7 +122,7 @@ Provider API Call
 git clone https://github.com/jhcdev/cats-claw.git
 cd cats-claw
 npm install
-cp .env.example .env   # Optional — auto-login works without .env
+cp .env.example .env   # Optional — set API keys here or enter them interactively
 npm link               # Installs 'paw' command globally
 ```
 
@@ -152,8 +151,8 @@ These are hosted services. You need an account and either an API key or an exist
 
 | Provider | Auth | How to get access |
 |----------|------|------------------|
-| Anthropic | API key or Claude login | Sign up at [console.anthropic.com](https://console.anthropic.com), or install [Claude Code](https://claude.ai/download) and run `claude` to login |
-| OpenAI | API key or Codex login | Sign up at [platform.openai.com](https://platform.openai.com), or install [Codex](https://github.com/openai/codex) and run `codex login` |
+| Anthropic | API key | Sign up at [console.anthropic.com](https://console.anthropic.com) |
+| OpenAI | API key | Sign up at [platform.openai.com](https://platform.openai.com) |
 | Gemini | API key | Get a key at [aistudio.google.com](https://aistudio.google.com/apikey) |
 | Groq | API key | Sign up at [console.groq.com](https://console.groq.com) |
 | OpenRouter | API key | Sign up at [openrouter.ai](https://openrouter.ai) — access multiple models with one key |
@@ -184,23 +183,6 @@ Ollama runs AI models directly on your machine. No API key, no cloud, no cost.
 - 16GB RAM minimum, 32GB recommended
 - GPU helps significantly but CPU-only works (slower)
 - Smaller models (7B-8B) are the easiest starting point
-
-### Auto-Login
-
-Cat's Claw automatically detects existing CLI sessions — no manual API key entry needed:
-
-| CLI Tool | Auth File | Provider |
-|----------|----------|----------|
-| Claude Code (`claude`) | `~/.claude/.credentials.json` | Anthropic |
-| Codex (`codex login`) | `~/.codex/auth.json` | OpenAI |
-
-If you already use Claude Code or Codex, just run `paw` and it will offer to reuse your session:
-
-```
-  =^.^= Use Claude login (max plan)? [Y/n]:
-```
-
-For other providers, enter your API key once and Cat's Claw saves it to `~/.cats-claw/credentials.json` (mode 0600) for next time.
 
 ### Model Catalog
 
@@ -479,8 +461,8 @@ See `.env.example` for all supported variables. Key ones:
 
 ```env
 LLM_PROVIDER=anthropic          # Default provider
-ANTHROPIC_API_KEY=...           # Or use Claude login
-OPENAI_API_KEY=...              # Or use Codex login
+ANTHROPIC_API_KEY=...
+OPENAI_API_KEY=...
 GEMINI_API_KEY=...
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen3
@@ -512,8 +494,8 @@ You'll see:
 
   Pick a brain for this cat:
 
-  1. ~ Anthropic (saved) — Claude models (API key or Claude login)
-  2. ~ OpenAI — GPT models (API key or Codex login)
+  1. ~ Anthropic (saved) — Claude models
+  2. ~ OpenAI — GPT models
   3. ~ Gemini — Google Gemini (strong long-context)
   4. ~ Groq — Fast inference, open models
   5. ~ OpenRouter — Multi-model hub, max flexibility
