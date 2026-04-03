@@ -105,6 +105,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [settingsPanel, setSettingsPanel] = useState<"off" | "list" | "auth-method" | "add-key">("off");
   const [settingsProvider, setSettingsProvider] = useState<string>("");
   const [settingsCursor, setSettingsCursor] = useState(0);
+  const [modelPanel, setModelPanel] = useState<"off" | "providers" | "models">("off");
+  const [modelPanelProvider, setModelPanelProvider] = useState<string>("");
+  const [modelPanelModels, setModelPanelModels] = useState<{ id: string; name: string }[]>([]);
+  const [modelCursor, setModelCursor] = useState(0);
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
@@ -135,6 +139,48 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         { role: "system", text: "Conversation compacted. Recent context preserved." },
         ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
       ]);
+      return;
+    }
+
+    // Model panel
+    if (modelPanel === "providers") {
+      if (key.escape) { setModelPanel("off"); return; }
+      const registered = agent.getMulti().getRegistered();
+      if (key.downArrow) { setModelCursor((i) => Math.min(i + 1, registered.length - 1)); return; }
+      if (key.upArrow) { setModelCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const selected = registered[modelCursor];
+        if (selected) {
+          setModelPanelProvider(selected.name);
+          // Load filtered models async via promise
+          getAllFilteredModels(agent.getProviderKeys()).then((all) => {
+            const provModels = all.find((g) => g.provider === selected.name);
+            setModelPanelModels(provModels?.models.map((m) => ({ id: m.id, name: m.name })) ?? []);
+            setModelPanel("models");
+            setModelCursor(0);
+          });
+        }
+        return;
+      }
+      return;
+    }
+    if (modelPanel === "models") {
+      if (key.escape) { setModelPanel("providers"); setModelCursor(0); return; }
+      if (key.downArrow) { setModelCursor((i) => Math.min(i + 1, modelPanelModels.length - 1)); return; }
+      if (key.upArrow) { setModelCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const selected = modelPanelModels[modelCursor];
+        if (selected) {
+          const result = agent.switchProvider(modelPanelProvider as any, selected.id);
+          if (result.ok) {
+            setEntries((c) => [...c, { role: "system", text: `Switched to ${modelPanelProvider}/${selected.id}` }]);
+          } else {
+            setEntries((c) => [...c, { role: "system", text: result.error ?? "Failed to switch." }]);
+          }
+        }
+        setModelPanel("off");
+        return;
+      }
       return;
     }
 
@@ -431,51 +477,34 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       // ── model ──
-      if (line.startsWith("/model")) {
+      if (line === "/model" || line === "/models") {
+        setModelPanel("providers");
+        setModelCursor(0);
+        return;
+      }
+      if (line.startsWith("/model ")) {
+        // Direct command: /model <provider> [model]
         const parts = line.split(/\s+/).slice(1);
         const validRoles = new Set(["planner", "coder", "reviewer", "tester", "optimizer"]);
-        if (parts.length === 0) {
-          // Show plan-filtered catalog
-          const all = await getAllFilteredModels(agent.getProviderKeys());
-          const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
-          let text = `Mode: ${mode.toUpperCase()} | Active: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n\n`;
-          text += all
-            .filter((g) => registered.has(g.provider) || g.provider === agent.getActiveProvider())
-            .map((g) => {
-              const active = g.provider === agent.getActiveProvider();
-              const planLabel = g.plan !== "api" && g.plan !== "free" ? ` (${g.plan} plan)` : "";
-              const models = g.models.map((m, i) => {
-                const act = m.id === (active ? agent.getActiveModel() : "") ? " *" : "";
-                const tag = m.minPlan !== "free" ? ` [${m.minPlan}]` : "";
-                return `  ${i + 1}. ${m.id}${act} — ${m.name}${tag}`;
-              }).join("\n");
-              return `${active ? "* " : "  "}${PROVIDER_LABELS[g.provider] ?? g.provider}${planLabel}:\n${models}`;
-            }).join("\n\n");
-          text += `\n\nSwitch: /model <provider> <number or id>`;
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
-        } else if (mode === "team" && validRoles.has(parts[0]!)) {
-          // Team mode: /model <role> <provider> [model]
+        if (mode === "team" && validRoles.has(parts[0]!)) {
           const role = parts[0] as "planner" | "coder" | "reviewer" | "tester" | "optimizer";
-          const prov = parts[1] as ProviderName;
-          const mdl = parts[2];
-          if (!prov) {
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Usage: /model ${role} <provider> [model]` }]);
-          } else if (!agent.getMulti().isRegistered(prov)) {
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Provider "${prov}" not available.` }]);
+          const prov = parts[1] as any;
+          if (!prov || !agent.getMulti().isRegistered(prov)) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Usage: /model ${role} <provider>` }]);
           } else {
             const cfg = agent.getMulti().getProviderConfig(prov);
-            if (!cfg) { setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Config not found for "${prov}".` }]); return; }
-            agent.getTeam().assignRole(role, { provider: prov, model: mdl ?? cfg.model, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl });
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `${role} → ${prov}/${mdl ?? cfg.model}` }]);
+            if (cfg) {
+              agent.getTeam().assignRole(role, { provider: prov, model: parts[2] ?? cfg.model, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl });
+              setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `${role} → ${prov}/${parts[2] ?? cfg.model}` }]);
+            }
           }
         } else {
-          // Solo mode: /model <provider> [model or number]
+          const provPlan = await detectPlan(parts[0] as any);
           const modelArg = parts[1];
-          const provPlan = await detectPlan(parts[0] as ProviderName);
           const resolvedModel = modelArg && /^\d+$/.test(modelArg)
-            ? resolveModelByIndex(parts[0] as ProviderName, parseInt(modelArg, 10), provPlan) ?? modelArg
+            ? resolveModelByIndex(parts[0] as any, parseInt(modelArg, 10), provPlan) ?? modelArg
             : modelArg;
-          const result = agent.switchProvider(parts[0] as ProviderName, resolvedModel);
+          const result = agent.switchProvider(parts[0] as any, resolvedModel);
           if (result.ok) {
             setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Switched to ${agent.getActiveProvider()}/${agent.getActiveModel()}` }]);
           } else {
@@ -741,7 +770,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor],
   );
 
   const providerLabel = PROVIDER_LABELS[options.provider] ?? options.provider;
@@ -799,6 +828,49 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           <Text color="#ff9c73" bold>{"=^.^= "}</Text>
           <Text color="gray" italic>{thinkMsg}</Text>
           <Newline />
+        </Box>
+      ) : null}
+
+      {modelPanel !== "off" ? (
+        <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+          <Text color="#ff9c73" bold>Model Selection</Text>
+          <Text color="gray">Active: <Text bold color="white">{agent.getActiveProvider()}/{agent.getActiveModel()}</Text></Text>
+
+          {modelPanel === "providers" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select provider:</Text>
+              {agent.getMulti().getRegistered().map((p, i) => (
+                <Box key={p.name}>
+                  <Text color={i === modelCursor ? "#ff9c73" : "gray"} bold={i === modelCursor}>
+                    {i === modelCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === modelCursor ? "#ff9c73" : "#ffb088"}>{p.name}</Text>
+                  <Text color="gray"> — {p.model}</Text>
+                  {p.name === agent.getActiveProvider() ? <Text color="green"> (active)</Text> : null}
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+
+          {modelPanel === "models" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select model for <Text bold color="#ffb088">{modelPanelProvider}</Text>:</Text>
+              {modelPanelModels.map((m, i) => (
+                <Box key={m.id}>
+                  <Text color={i === modelCursor ? "#ff9c73" : "gray"} bold={i === modelCursor}>
+                    {i === modelCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === modelCursor ? "#ff9c73" : "gray"}>
+                    {m.id}
+                  </Text>
+                  <Text color="gray"> — {m.name}</Text>
+                  {m.id === agent.getActiveModel() ? <Text color="green"> *</Text> : null}
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
         </Box>
       ) : null}
 
