@@ -101,9 +101,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [mcpAddName, setMcpAddName] = useState("");
   const [mcpAddCmd, setMcpAddCmd] = useState("");
   const [mode, setMode] = useState<"solo" | "team">("solo");
-  const [teamPanel, setTeamPanel] = useState<"off" | "list" | "pick-role" | "pick-provider">("off");
+  const [teamPanel, setTeamPanel] = useState<"off" | "list" | "pick-role" | "pick-provider" | "pick-model" | "pick-effort">("off");
   const [teamEditRole, setTeamEditRole] = useState<string>("");
   const [teamEditProvider, setTeamEditProvider] = useState<string>("");
+  const [teamModels, setTeamModels] = useState<{ id: string; name: string }[]>([]);
   const [settingsPanel, setSettingsPanel] = useState<"off" | "list" | "auth-method" | "add-key">("off");
   const [settingsProvider, setSettingsProvider] = useState<string>("");
   const [settingsCursor, setSettingsCursor] = useState(0);
@@ -337,13 +338,52 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (key.return) {
         const prov = providers[settingsCursor];
         if (prov) {
-          const cfg = agent.getMulti().getProviderConfig(prov.name);
+          setTeamEditProvider(prov.name);
+          // Load models for this provider
+          getAllFilteredModels(agent.getProviderKeys()).then((all) => {
+            const provModels = all.find((g) => g.provider === prov.name);
+            setTeamModels(provModels?.models.map((m) => ({ id: m.id, name: m.name })) ?? []);
+            setTeamPanel("pick-model");
+            setSettingsCursor(0);
+          });
+        }
+        return;
+      }
+      return;
+    }
+    if (teamPanel === "pick-model") {
+      if (key.escape) { setTeamPanel("pick-provider"); setSettingsCursor(0); return; }
+      if (key.downArrow) { setSettingsCursor((i) => Math.min(i + 1, teamModels.length - 1)); return; }
+      if (key.upArrow) { setSettingsCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const model = teamModels[settingsCursor];
+        if (model) {
+          const cfg = agent.getMulti().getProviderConfig(teamEditProvider as any);
           if (cfg) {
-            agent.getTeam().assignRole(teamEditRole as any, { provider: prov.name, model: prov.model, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl });
-            setEntries((c) => [...c, { role: "system", text: `${teamEditRole} → ${prov.name}/${prov.model}` }]);
+            agent.getTeam().assignRole(teamEditRole as any, { provider: teamEditProvider as any, model: model.id, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl });
+            if (teamEditProvider === "codex" || teamEditProvider === "anthropic") {
+              setTeamPanel("pick-effort");
+              setSettingsCursor(1); // default medium
+              return;
+            }
+            setEntries((c) => [...c, { role: "system", text: `${teamEditRole} → ${teamEditProvider}/${model.id}` }]);
           }
         }
-        setTeamPanel("off");
+        setTeamPanel("pick-role"); // Go back to role selection
+        setSettingsCursor(0);
+        return;
+      }
+      return;
+    }
+    if (teamPanel === "pick-effort") {
+      const efforts = ["low", "medium", "high", "extra_high"] as const;
+      if (key.escape) { setTeamPanel("pick-model"); setSettingsCursor(0); return; }
+      if (key.downArrow) { setSettingsCursor((i) => Math.min(i + 1, efforts.length - 1)); return; }
+      if (key.upArrow) { setSettingsCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const effort = efforts[settingsCursor]!;
+        setEntries((c) => [...c, { role: "system", text: `${teamEditRole} → ${teamEditProvider} (effort: ${effort})` }]);
+        setTeamPanel("pick-role"); // Go back to role selection for more changes
         setSettingsCursor(0);
         return;
       }
@@ -1106,6 +1146,36 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                     {i === settingsCursor ? " > " : "   "}
                   </Text>
                   <Text color={i === settingsCursor ? "#ff9c73" : "gray"}>{`${p.name} / ${p.model}`}</Text>
+                </Box>
+              ))}
+              <Text color="gray" italic>{"  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+
+          {teamPanel === "pick-model" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray">Model for <Text bold color="#ffb088">{teamEditRole}</Text> ({teamEditProvider}):</Text>
+              {teamModels.map((m, i) => (
+                <Box key={m.id}>
+                  <Text color={i === settingsCursor ? "#ff9c73" : "gray"} bold={i === settingsCursor}>
+                    {i === settingsCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === settingsCursor ? "#ff9c73" : "gray"}>{m.id} — {m.name}</Text>
+                </Box>
+              ))}
+              <Text color="gray" italic>{"  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+
+          {teamPanel === "pick-effort" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray">Effort for <Text bold color="#ffb088">{teamEditRole}</Text> ({teamEditProvider}):</Text>
+              {["Low — Fast, lighter reasoning", "Medium — Balanced (default)", "High — Complex problems", "Extra High — Maximum depth"].map((label, i) => (
+                <Box key={label}>
+                  <Text color={i === settingsCursor ? "#ff9c73" : "gray"} bold={i === settingsCursor}>
+                    {i === settingsCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === settingsCursor ? "#ff9c73" : "gray"}>{label}</Text>
                 </Box>
               ))}
               <Text color="gray" italic>{"  ↑↓ navigate  Enter select  Esc back"}</Text>
