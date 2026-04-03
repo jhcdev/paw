@@ -1,7 +1,7 @@
 {
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"npx tsc --noEmit 2>&1\",\"timeout\":30000,\"description\":\"Type-check all changes\"}",
-  "error": "Exit code 2\nsrc/cli.tsx(329,120): error TS2304: Cannot find name 'reg'.",
-  "timestamp": "2026-04-03T08:10:35.319Z",
+  "tool_name": "Read",
+  "tool_input_preview": "{\"file_path\":\"/home/dev/cats-claw/src/cli.tsx\"}",
+  "error": "File content (12646 tokens) exceeds maximum allowed tokens (10000). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+  "timestamp": "2026-04-03T08:41:49.740Z",
   "retry_count": 1
 }

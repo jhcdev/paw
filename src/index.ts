@@ -126,49 +126,57 @@ async function main(): Promise<void> {
 
   if (args.prompt) {
     // Handle slash commands in one-shot mode
-    if (args.prompt === "/settings" || args.prompt === "/providers") {
+    if (["/status", "/settings", "/providers", "/cost", "/version"].includes(args.prompt)) {
       const registered = agent.getMulti().getRegistered();
       const teamRoles = agent.getTeam().getRoles();
-      process.stdout.write(`Provider: ${pc.cyan(agent.getActiveProvider())}/${agent.getActiveModel()}\n`);
-      process.stdout.write(`\nAvailable Providers (${registered.length}):\n`);
+      process.stdout.write(`Cat's Claw v1.0.0\n`);
+      process.stdout.write(`Active: ${pc.cyan(agent.getActiveProvider())}/${agent.getActiveModel()}\n`);
+      process.stdout.write(`\nProviders (${registered.length}):\n`);
       for (const p of registered) process.stdout.write(`  ${p.name === agent.getActiveProvider() ? "* " : "  "}${p.name} — ${p.model}\n`);
       if (teamRoles.length > 0) {
         process.stdout.write(`\nTeam Roles:\n`);
-        for (const r of teamRoles) process.stdout.write(`  ${r.role}: ${r.provider}/${r.model}\n`);
+        for (const r of teamRoles) process.stdout.write(`  ${r.role.padEnd(10)} ${r.provider}/${r.model}\n`);
       }
-      process.stdout.write(`\nMCP: ${agent.getMcpStatus().length} server(s)\n`);
+      process.stdout.write(`\nUsage:\n${agent.tracker.formatReport()}\n`);
+      process.stdout.write(`MCP: ${agent.getMcpStatus().length} server(s)\n`);
       await agent.shutdown(); return;
     }
-    if (args.prompt === "/model") {
-      process.stdout.write(`Provider: ${agent.getActiveProvider()}\nModel:    ${agent.getActiveModel()}\n`);
-      const registered = agent.getMulti().getRegistered();
-      process.stdout.write(`Available: ${registered.map((p) => p.name).join(", ")}\n`);
+    if (args.prompt === "/model" || args.prompt === "/models" || args.prompt?.startsWith("/models ")) {
+      const all = getAllModels();
+      const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
+      process.stdout.write(`Active: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n\n`);
+      for (const g of all) {
+        if (!registered.has(g.provider) && g.provider !== agent.getActiveProvider()) continue;
+        const active = g.provider === agent.getActiveProvider();
+        process.stdout.write(`${active ? "* " : "  "}${g.provider}:\n${formatModelList(g.provider, active ? agent.getActiveModel() : undefined)}\n\n`);
+      }
+      process.stdout.write(`Switch: /model <provider> <number or id>\n`);
+      await agent.shutdown(); return;
+    }
+    if (["/git", "/diff", "/log"].includes(args.prompt)) {
+      const { exec: e } = await import("node:child_process");
+      const { promisify: p } = await import("node:util");
+      const run = p(e);
+      try {
+        const { stdout: status } = await run("git status --short", { cwd: args.cwd });
+        process.stdout.write(`Status:\n${status.trim() || "  (clean)"}\n`);
+      } catch { process.stdout.write("Not a git repository.\n"); }
+      try {
+        const { stdout: diff } = await run("git diff --stat", { cwd: args.cwd });
+        if (diff.trim()) process.stdout.write(`\nDiff:\n${diff.trim()}\n`);
+      } catch {}
+      try {
+        const { stdout: log } = await run("git log --oneline -5", { cwd: args.cwd });
+        if (log.trim()) process.stdout.write(`\nRecent:\n${log.trim()}\n`);
+      } catch {}
       await agent.shutdown(); return;
     }
     if (args.prompt === "/doctor") {
-      process.stdout.write(`Node: ${process.version}\nPlatform: ${process.platform} ${process.arch}\n`);
+      process.stdout.write(`Cat's Claw v1.0.0\n`);
+      process.stdout.write(`Node: ${process.version} | ${process.platform} ${process.arch}\n`);
       process.stdout.write(`Provider: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n`);
+      process.stdout.write(`Providers: ${agent.getMulti().getRegistered().map((p) => p.name).join(", ")}\n`);
       process.stdout.write(`MCP: ${agent.getMcpStatus().length} server(s)\n`);
-      process.stdout.write(`Usage: ${agent.getUsage().inputTokens + agent.getUsage().outputTokens} tokens\n`);
-      await agent.shutdown(); return;
-    }
-    if (args.prompt === "/version") {
-      process.stdout.write("Cat's Claw v1.0.0\n");
-      await agent.shutdown(); return;
-    }
-    if (args.prompt === "/models" || args.prompt?.startsWith("/models ")) {
-      const target = args.prompt.split(/\s+/)[1] as ProviderName | undefined;
-      if (target) {
-        process.stdout.write(`Models for ${target}:\n${formatModelList(target, agent.getActiveModel())}\n`);
-      } else {
-        const all = getAllModels();
-        const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
-        for (const g of all) {
-          if (!registered.has(g.provider) && g.provider !== agent.getActiveProvider()) continue;
-          const active = g.provider === agent.getActiveProvider();
-          process.stdout.write(`${active ? "* " : "  "}${g.provider}:\n${formatModelList(g.provider, active ? agent.getActiveModel() : undefined)}\n\n`);
-        }
-      }
       await agent.shutdown(); return;
     }
     if (args.prompt.startsWith("/team ")) {

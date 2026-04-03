@@ -1,4 +1,5 @@
 import { McpManager, type McpServerEntry } from "./mcp.js";
+import { UsageTracker } from "./usage-tracker.js";
 import { MultiProvider, detectProviders } from "./multi-provider.js";
 import { TeamRunner, autoConfigureTeam } from "./team.js";
 import { createProvider } from "./providers/index.js";
@@ -14,6 +15,7 @@ export class CodingAgent {
   private readonly cwd: string;
   private mcpReady = false;
   private totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  readonly tracker = new UsageTracker();
 
   constructor(args: { provider: ProviderName; apiKey: string; model: string; cwd: string; baseUrl?: string }) {
     this.mcpManager = new McpManager();
@@ -59,6 +61,7 @@ export class CodingAgent {
       const result = await this.provider.runTurn(prompt);
       this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
       this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
+      this.tracker.record(this.currentProvider, this.currentModel, result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0);
       return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

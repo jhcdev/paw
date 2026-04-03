@@ -58,24 +58,17 @@ function formatTokens(n: number): string {
 
 const COMMANDS: { name: string; desc: string }[] = [
   { name: "/help", desc: "show all commands" },
+  { name: "/status", desc: "providers, usage, cost overview" },
+  { name: "/model", desc: "list/switch models & providers" },
+  { name: "/team", desc: "team dashboard & collaboration" },
+  { name: "/ask", desc: "query another provider" },
   { name: "/tools", desc: "available tools" },
-  { name: "/mcp", desc: "MCP server status" },
-  { name: "/model", desc: "current model info" },
-  { name: "/models", desc: "list available models" },
-  { name: "/cost", desc: "token usage" },
-  { name: "/git", desc: "git status" },
-  { name: "/diff", desc: "git diff" },
-  { name: "/log", desc: "recent commits" },
+  { name: "/mcp", desc: "MCP server manager" },
+  { name: "/git", desc: "git status, diff, log" },
   { name: "/history", desc: "export conversation" },
   { name: "/compact", desc: "compress conversation" },
-  { name: "/team", desc: "multi-model collaboration" },
-  { name: "/ask", desc: "query another provider" },
-  { name: "/settings", desc: "manage providers" },
-  { name: "/mode", desc: "switch solo/team mode" },
-  { name: "/providers", desc: "list available providers" },
   { name: "/init", desc: "generate project context" },
-  { name: "/doctor", desc: "diagnostics check" },
-  { name: "/version", desc: "show version" },
+  { name: "/doctor", desc: "diagnostics" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
 ];
@@ -303,25 +296,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           { role: "user", text: line },
           { role: "system", text: [
             "Commands:",
-            "  /help      - this menu",
-            "  /tools     - available tools",
-            "  /mcp       - MCP server status",
-            "  /models    - list available models",
-            "  /model     - show/switch provider & model",
-            "  /cost      - token usage",
-            "  /git       - git status",
-            "  /diff      - git diff",
-            "  /log       - recent git commits",
-            "  /history   - export conversation",
+            "  /status    - providers, usage & cost overview",
+            "  /model     - list/switch models (number or id)",
+            "  /team      - team dashboard & mode toggle",
+            "  /ask <p> q - query specific provider",
+            "  /tools     - built-in + MCP tools",
+            "  /mcp       - MCP server manager",
+            "  /git       - git status + diff + recent log",
+            "  /history   - export chat to markdown",
             "  /compact   - compress conversation",
-            "  /settings  - manage providers & mode",
-            "  /mode      - switch solo/team mode",
-            "  /team <p>  - multi-model collaboration (plan→code→review)",
-            "  /ask <p> q - query another provider",
-            "  /providers - list available providers & team",
-            "  /init      - generate project context",
-            "  /doctor    - diagnostics check",
-            "  /version   - show version",
+            "  /init      - generate CONTEXT.md",
+            "  /doctor    - diagnostics",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -352,44 +337,22 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── models ──
-      if (line === "/models" || line.startsWith("/models ")) {
-        const targetProvider = line.split(/\s+/)[1] as ProviderName | undefined;
-        if (targetProvider && agent.getMulti().isRegistered(targetProvider)) {
-          const list = formatModelList(targetProvider, targetProvider === agent.getActiveProvider() ? agent.getActiveModel() : undefined);
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Models for ${PROVIDER_LABELS[targetProvider] ?? targetProvider}:\n${list}\n\nSwitch: /model ${targetProvider} <number or id>` }]);
-        } else {
-          const all = getAllModels();
-          const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
-          const lines = all
-            .filter((g) => registered.has(g.provider) || g.provider === agent.getActiveProvider())
-            .map((g) => {
-              const label = PROVIDER_LABELS[g.provider] ?? g.provider;
-              const active = g.provider === agent.getActiveProvider();
-              const list = formatModelList(g.provider, active ? agent.getActiveModel() : undefined);
-              return `${active ? "* " : "  "}${label}:\n${list}`;
-            }).join("\n\n");
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Available Models (* = active):\n\n${lines}\n\nSwitch: /model <provider> <number or id>` }]);
-        }
-        return;
-      }
-
       // ── model ──
       if (line.startsWith("/model")) {
         const parts = line.split(/\s+/).slice(1);
         const validRoles = new Set(["planner", "coder", "reviewer", "tester", "optimizer"]);
         if (parts.length === 0) {
-          // Show current state
-          let text = `Mode: ${mode.toUpperCase()}\n`;
-          text += `Active: ${PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider()} / ${agent.getActiveModel()}\n`;
-          if (mode === "team") {
-            text += `\nTeam:\n` + agent.getTeam().getRoles().map((r) => `  ${r.role}: ${r.provider}/${r.model}`).join("\n");
-            text += `\n\nChange role: /model <role> <provider> [model]`;
-          } else {
-            text += `\nSwitch: /model <provider> [model]`;
-          }
-          const available = agent.getMulti().getRegistered();
-          text += `\nAvailable: ${available.map((p) => p.name).join(", ")}`;
+          // Show catalog + current state
+          const all = getAllModels();
+          const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
+          let text = `Mode: ${mode.toUpperCase()} | Active: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n\n`;
+          text += all
+            .filter((g) => registered.has(g.provider) || g.provider === agent.getActiveProvider())
+            .map((g) => {
+              const active = g.provider === agent.getActiveProvider();
+              return `${active ? "* " : "  "}${PROVIDER_LABELS[g.provider] ?? g.provider}:\n${formatModelList(g.provider, active ? agent.getActiveModel() : undefined)}`;
+            }).join("\n\n");
+          text += `\n\nSwitch: /model <provider> <number or id>`;
           setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
         } else if (mode === "team" && validRoles.has(parts[0]!)) {
           // Team mode: /model <role> <provider> [model]
@@ -422,62 +385,22 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── cost ──
-      if (line === "/cost") {
-        const usage = agent.getUsage();
-        if (options.provider === "ollama") {
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: `Turns: ${turnCount}\nLocal model — token tracking not applicable.` },
-          ]);
-        } else {
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: `Turns: ${turnCount}\nInput:  ${formatTokens(usage.inputTokens)} tokens\nOutput: ${formatTokens(usage.outputTokens)} tokens\nTotal:  ${formatTokens(usage.inputTokens + usage.outputTokens)} tokens` },
-          ]);
-        }
-        return;
-      }
-
       // ── git ──
-      if (line === "/git") {
+      if (line === "/git" || line === "/diff" || line === "/log") {
+        const parts: string[] = [];
         try {
-          const { stdout } = await execAsync("git status --short", { cwd: options.cwd });
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: stdout.trim() || "(working tree clean)" },
-          ]);
-        } catch {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Not a git repository." }]);
-        }
-        return;
-      }
-
-      // ── diff ──
-      if (line === "/diff") {
+          const { stdout: status } = await execAsync("git status --short", { cwd: options.cwd });
+          parts.push(`Status:\n${status.trim() || "  (clean)"}`);
+        } catch { parts.push("Not a git repository."); }
         try {
-          const { stdout } = await execAsync("git diff --stat", { cwd: options.cwd });
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: stdout.trim() || "(no changes)" },
-          ]);
-        } catch {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Not a git repository." }]);
-        }
-        return;
-      }
-
-      // ── log ──
-      if (line === "/log") {
+          const { stdout: diff } = await execAsync("git diff --stat", { cwd: options.cwd });
+          if (diff.trim()) parts.push(`\nDiff:\n${diff.trim()}`);
+        } catch {}
         try {
-          const { stdout } = await execAsync("git log --oneline -10", { cwd: options.cwd });
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: stdout.trim() || "(no commits)" },
-          ]);
-        } catch {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Not a git repository." }]);
-        }
+          const { stdout: log } = await execAsync("git log --oneline -5", { cwd: options.cwd });
+          if (log.trim()) parts.push(`\nRecent commits:\n${log.trim()}`);
+        } catch {}
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: parts.join("\n") }]);
         return;
       }
 
@@ -516,20 +439,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           { role: "system", text: "Conversation compacted. Recent context preserved." },
           ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
         ]);
-        return;
-      }
-
-      // ── providers ──
-      if (line === "/providers") {
-        const registered = agent.getMulti().getRegistered();
-        const teamRoles = agent.getTeam().getRoles();
-        let text = `Available Providers (${registered.length}):\n`;
-        text += registered.map((p) => `  ${p.name === options.provider ? "* " : "  "}${p.name} — ${p.model}`).join("\n");
-        if (teamRoles.length > 0) {
-          text += `\n\nTeam Roles:\n`;
-          text += teamRoles.map((r) => `  ${r.role}: ${r.provider}/${r.model}`).join("\n");
-        }
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
         return;
       }
 
@@ -594,40 +503,30 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── settings ──
-      if (line === "/settings") {
-        const registered = agent.getMulti().getRegistered();
-        const teamRoles = agent.getTeam().getRoles();
-        let text = `Mode: ${mode.toUpperCase()}\n\n`;
-        text += `Providers (${registered.length}):\n`;
-        text += registered.map((p) => `  ${p.name === options.provider ? "* " : "  "}${p.name} — ${p.model}`).join("\n");
-        if (teamRoles.length > 0) {
-          text += `\n\nTeam Assignments:\n`;
-          text += teamRoles.map((r) => `  ${r.role}: ${r.provider}/${r.model}`).join("\n");
-        }
-        text += `\n\nCommands:\n  /mode solo   — single provider mode\n  /mode team   — multi-model collaboration\n  /providers   — detailed provider list`;
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
-        return;
-      }
-
-      // ── mode ──
+      // ── mode (redirect) ──
       if (line.startsWith("/mode")) {
         const target = line.split(/\s+/)[1]?.toLowerCase();
-        if (target === "solo") {
-          setMode("solo");
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Switched to solo mode. Messages go to your primary provider." }]);
-        } else if (target === "team") {
-          if (!agent.getTeam().isReady()) {
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No providers configured for team mode." }]);
-          } else {
-            setMode("team");
-            const roles = agent.getTeam().getRoles();
-            const roleList = roles.map((r) => `  ${r.role}: ${r.provider}/${r.model}`).join("\n");
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Switched to team mode. All messages go through the pipeline:\n${roleList}` }]);
-          }
-        } else {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Current mode: ${mode}\nUsage: /mode solo | /mode team` }]);
+        if (target === "solo") { setMode("solo"); setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Switched to solo mode." }]); return; }
+        if (target === "team") { setMode("team"); setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Switched to team mode." }]); return; }
+        // No arg = show status
+      }
+
+      // ── status ──
+      if (line === "/status" || line === "/settings" || line === "/providers" || line === "/cost" || line === "/version") {
+        const registered = agent.getMulti().getRegistered();
+        const teamRoles = agent.getTeam().getRoles();
+        const usageReport = agent.tracker.formatReport();
+        let text = `Cat's Claw v1.0.0 | Mode: ${mode.toUpperCase()}\n`;
+        text += `Active: ${PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider()} / ${agent.getActiveModel()}\n`;
+        text += `\nProviders (${registered.length}):\n`;
+        text += registered.map((p) => `  ${p.name === agent.getActiveProvider() ? "* " : "  "}${p.name} — ${p.model}`).join("\n");
+        if (mode === "team") {
+          text += `\n\nTeam:\n`;
+          text += teamRoles.map((r) => `  ${r.role.padEnd(10)} ${r.provider}/${r.model}`).join("\n");
         }
+        text += `\n\nUsage:\n${usageReport}`;
+        text += `\n\nSwitch: /model <provider> [model] | /team (dashboard)`;
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
         return;
       }
 
@@ -697,15 +596,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setEntries((c) => [...c,
           { role: "user", text: line },
           { role: "system", text: `Diagnostics:\n${checks.map(c => "  " + c).join("\n")}` },
-        ]);
-        return;
-      }
-
-      // ── version ──
-      if (line === "/version") {
-        setEntries((c) => [...c,
-          { role: "user", text: line },
-          { role: "system", text: "Cat's Claw v1.0.0" },
         ]);
         return;
       }
