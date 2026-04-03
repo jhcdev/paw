@@ -119,6 +119,13 @@
       ]
     }
   },
-  "hotPaths": [],
+  "hotPaths": [
+    {
+      "path": "src/agent.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775222970996,
+      "type": "file"
+    }
+  ],
   "userDirectives": []
 }

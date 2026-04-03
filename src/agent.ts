@@ -57,50 +57,37 @@ export class CodingAgent {
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
-    // Retry with backoff before falling back
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const result = await this.provider.runTurn(prompt);
-        this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
-        this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
-        this.tracker.record(this.currentProvider, this.currentModel, result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0);
-        return result;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        const lower = msg.toLowerCase();
-        const isRateLimit = lower.includes("rate limit") || lower.includes("429") || lower.includes("overloaded");
-        const isAuthError = lower.includes("401") || lower.includes("403") ||
-          lower.includes("billing") || lower.includes("credit") || lower.includes("quota");
+    try {
+      const result = await this.provider.runTurn(prompt);
+      this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
+      this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
+      this.tracker.record(this.currentProvider, this.currentModel, result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0);
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const lower = msg.toLowerCase();
+      const isRetryable = lower.includes("rate limit") || lower.includes("429") ||
+        lower.includes("overloaded") || lower.includes("401") || lower.includes("403") ||
+        lower.includes("billing") || lower.includes("credit") || lower.includes("quota");
 
-        if (isRateLimit && attempt < 2) {
-          // Wait and retry (5s, then 15s)
-          const delay = attempt === 0 ? 5000 : 15000;
-          await new Promise((r) => setTimeout(r, delay));
-          continue;
-        }
-
-        if (isRateLimit || isAuthError) {
-          // All retries exhausted or permanent error — fallback
-          const originalProvider = this.currentProvider;
-          const registered = this.multi.getRegistered();
-          for (const alt of registered) {
-            if (alt.name !== originalProvider) {
-              const switched = this.switchProvider(alt.name);
-              if (switched.ok) {
-                const fallbackResult = await this.provider.runTurn(prompt);
-                this.totalUsage.inputTokens += fallbackResult.usage?.inputTokens ?? 0;
-                this.totalUsage.outputTokens += fallbackResult.usage?.outputTokens ?? 0;
-                // Switch back to original provider for next turn
-                this.switchProvider(originalProvider);
-                return { ...fallbackResult, text: `[Fallback: ${alt.name}/${alt.model}]\n${fallbackResult.text}` };
-              }
+      if (isRetryable) {
+        const originalProvider = this.currentProvider;
+        const registered = this.multi.getRegistered();
+        for (const alt of registered) {
+          if (alt.name !== originalProvider) {
+            const switched = this.switchProvider(alt.name);
+            if (switched.ok) {
+              const fallbackResult = await this.provider.runTurn(prompt);
+              this.totalUsage.inputTokens += fallbackResult.usage?.inputTokens ?? 0;
+              this.totalUsage.outputTokens += fallbackResult.usage?.outputTokens ?? 0;
+              this.switchProvider(originalProvider);
+              return { ...fallbackResult, text: `[Fallback: ${alt.name}/${alt.model}]\n${fallbackResult.text}` };
             }
           }
         }
-        throw err;
       }
+      throw err;
     }
-    throw new Error("Unexpected: retry loop exhausted");
   }
 
   getUsage(): TokenUsage {
