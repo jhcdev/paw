@@ -143,6 +143,15 @@ export class CodingAgent {
     return { ok: true };
   }
 
+  getProviderKeys(): Map<string, { apiKey: string; baseUrl?: string }> {
+    const map = new Map<string, { apiKey: string; baseUrl?: string }>();
+    for (const reg of this.multi.getRegistered()) {
+      const cfg = this.multi.getProviderConfig(reg.name);
+      if (cfg) map.set(reg.name, { apiKey: cfg.apiKey, baseUrl: cfg.baseUrl });
+    }
+    return map;
+  }
+
   getMcpStatus(): { name: string; toolCount: number }[] {
     return this.mcpManager.getStatus();
   }

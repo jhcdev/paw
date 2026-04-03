@@ -159,6 +159,64 @@ function formatBytes(bytes: number): string {
   return `${bytes}B`;
 }
 
+/** Fetch available models from OpenAI-compatible /v1/models endpoint */
+async function fetchOpenAIModels(baseUrl: string, apiKey: string): Promise<ModelInfo[]> {
+  try {
+    const res = await fetch(`${baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as { data?: { id: string }[] };
+    return (data.data ?? []).map((m) => ({
+      id: m.id,
+      name: m.id,
+      tier: "standard" as const,
+      minPlan: "free" as PlanLevel,
+    }));
+  } catch { return []; }
+}
+
+/** Fetch Gemini models from Google AI API */
+async function fetchGeminiModels(apiKey: string): Promise<ModelInfo[]> {
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return [];
+    const data = await res.json() as { models?: { name: string; displayName: string; description?: string }[] };
+    return (data.models ?? [])
+      .filter((m) => m.name.includes("gemini"))
+      .map((m) => {
+        const id = m.name.replace("models/", "");
+        const tier: "fast" | "standard" | "strong" = id.includes("flash") ? "fast" : id.includes("pro") ? "strong" : "standard";
+        return { id, name: m.displayName, tier, minPlan: "free" as PlanLevel };
+      });
+  } catch { return []; }
+}
+
+/** Live-detect models for API key providers */
+export async function detectLiveModels(provider: ProviderName, apiKey: string, baseUrl?: string): Promise<ModelInfo[] | null> {
+  switch (provider) {
+    case "openai":
+      if (apiKey) return fetchOpenAIModels("https://api.openai.com/v1", apiKey);
+      return null;
+    case "gemini":
+      if (apiKey) return fetchGeminiModels(apiKey);
+      return null;
+    case "groq":
+      if (apiKey) return fetchOpenAIModels("https://api.groq.com/openai/v1", apiKey);
+      return null;
+    case "openrouter":
+      if (apiKey) return fetchOpenAIModels(baseUrl ?? "https://openrouter.ai/api/v1", apiKey);
+      return null;
+    case "ollama":
+      return detectOllamaModels();
+    default:
+      return null;
+  }
+}
+
 /** Detect plan for a provider. API key = all models. Login = plan-based. */
 export async function detectPlan(provider: ProviderName): Promise<PlanLevel> {
   switch (provider) {
@@ -191,18 +249,28 @@ export function getAllModels(): { provider: ProviderName; models: ModelInfo[] }[
   }));
 }
 
-export async function getAllFilteredModels(): Promise<{ provider: ProviderName; plan: PlanLevel; models: ModelInfo[] }[]> {
+export async function getAllFilteredModels(
+  providerKeys?: Map<string, { apiKey: string; baseUrl?: string }>,
+): Promise<{ provider: ProviderName; plan: PlanLevel; models: ModelInfo[] }[]> {
   const results: { provider: ProviderName; plan: PlanLevel; models: ModelInfo[] }[] = [];
-  for (const [provider, models] of Object.entries(CATALOG) as [ProviderName, ModelInfo[]][]) {
+
+  for (const [provider, catalogModels] of Object.entries(CATALOG) as [ProviderName, ModelInfo[]][]) {
     const plan = await detectPlan(provider);
-    if (provider === "ollama") {
-      // Use actually pulled models instead of static catalog
-      const live = await detectOllamaModels();
-      results.push({ provider, plan, models: live.length > 0 ? live : models });
-    } else {
-      results.push({ provider, plan, models: models.filter((m) => hasAccess(plan, m.minPlan)) });
+    const keyInfo = providerKeys?.get(provider);
+
+    // Try live detection for providers with API keys
+    if (keyInfo?.apiKey || provider === "ollama") {
+      const live = await detectLiveModels(provider, keyInfo?.apiKey ?? "", keyInfo?.baseUrl);
+      if (live && live.length > 0) {
+        results.push({ provider, plan, models: live });
+        continue;
+      }
     }
+
+    // Fallback to plan-filtered static catalog
+    results.push({ provider, plan, models: catalogModels.filter((m) => hasAccess(plan, m.minPlan)) });
   }
+
   return results;
 }
 

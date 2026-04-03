@@ -343,7 +343,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const validRoles = new Set(["planner", "coder", "reviewer", "tester", "optimizer"]);
         if (parts.length === 0) {
           // Show plan-filtered catalog
-          const all = await getAllFilteredModels();
+          const all = await getAllFilteredModels(agent.getProviderKeys());
           const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
           let text = `Mode: ${mode.toUpperCase()} | Active: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n\n`;
           text += all
