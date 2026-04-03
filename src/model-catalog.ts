@@ -36,26 +36,6 @@ const CATALOG: Record<ProviderName, ModelInfo[]> = {
     { id: "claude-3-5-haiku-20241022", name: "Haiku 3.5", tier: "fast", minPlan: "api" },
     { id: "claude-3-5-sonnet-20241022", name: "Sonnet 3.5 v2", tier: "standard", minPlan: "api" },
   ],
-  gemini: [
-    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", tier: "fast", minPlan: "free" },
-    { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite", tier: "fast", minPlan: "free" },
-    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "strong", minPlan: "free" },
-    { id: "gemma-3-27b-it", name: "Gemma 3 27B", tier: "standard", minPlan: "free" },
-  ],
-  groq: [
-    { id: "openai/gpt-oss-20b", name: "GPT-OSS 20B", tier: "fast", minPlan: "free" },
-    { id: "openai/gpt-oss-120b", name: "GPT-OSS 120B", tier: "strong", minPlan: "free" },
-    { id: "qwen/qwen3-32b", name: "Qwen3 32B", tier: "standard", minPlan: "free" },
-    { id: "meta-llama/llama-3.3-70b-versatile", name: "Llama 3.3 70B", tier: "standard", minPlan: "free" },
-  ],
-  openrouter: [
-    { id: "openrouter/free", name: "Free (auto)", tier: "fast", minPlan: "free" },
-    { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", tier: "standard", minPlan: "free" },
-    { id: "google/gemini-2.5-pro", name: "Gemini 2.5 Pro", tier: "strong", minPlan: "free" },
-    { id: "openai/gpt-5-mini", name: "GPT-5 Mini", tier: "standard", minPlan: "free" },
-    { id: "meta-llama/llama-3.3-70b-instruct:free", name: "Llama 3.3 70B (free)", tier: "standard", minPlan: "free" },
-    { id: "openai/gpt-5.2", name: "GPT-5.2", tier: "strong", minPlan: "free" },
-  ],
   codex: [
     { id: "gpt-5.4", name: "GPT-5.4 (default)", tier: "strong", minPlan: "free" },
     { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", tier: "standard", minPlan: "free" },
@@ -130,54 +110,9 @@ function formatBytes(bytes: number): string {
   return `${bytes}B`;
 }
 
-/** Fetch available models from OpenAI-compatible /v1/models endpoint */
-async function fetchOpenAIModels(baseUrl: string, apiKey: string): Promise<ModelInfo[]> {
-  try {
-    const res = await fetch(`${baseUrl}/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json() as { data?: { id: string }[] };
-    return (data.data ?? []).map((m) => ({
-      id: m.id,
-      name: m.id,
-      tier: "standard" as const,
-      minPlan: "free" as PlanLevel,
-    }));
-  } catch { return []; }
-}
-
-/** Fetch Gemini models from Google AI API */
-async function fetchGeminiModels(apiKey: string): Promise<ModelInfo[]> {
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return [];
-    const data = await res.json() as { models?: { name: string; displayName: string; description?: string }[] };
-    return (data.models ?? [])
-      .filter((m) => m.name.includes("gemini"))
-      .map((m) => {
-        const id = m.name.replace("models/", "");
-        const tier: "fast" | "standard" | "strong" = id.includes("flash") ? "fast" : id.includes("pro") ? "strong" : "standard";
-        return { id, name: m.displayName, tier, minPlan: "free" as PlanLevel };
-      });
-  } catch { return []; }
-}
-
 /** Live-detect models for API key providers */
 export async function detectLiveModels(provider: ProviderName, apiKey: string, baseUrl?: string): Promise<ModelInfo[] | null> {
   switch (provider) {
-    case "gemini":
-      if (apiKey) return fetchGeminiModels(apiKey);
-      return null;
-    case "groq":
-      if (apiKey) return fetchOpenAIModels("https://api.groq.com/openai/v1", apiKey);
-      return null;
-    case "openrouter":
-      if (apiKey) return fetchOpenAIModels(baseUrl ?? "https://openrouter.ai/api/v1", apiKey);
-      return null;
     case "ollama":
       return detectOllamaModels();
     default:
@@ -190,10 +125,6 @@ export async function detectPlan(provider: ProviderName): Promise<PlanLevel> {
   switch (provider) {
     case "anthropic": return detectAnthropicPlan();
     case "codex": return "api";
-    case "gemini":
-    case "groq":
-    case "openrouter":
-      return "api"; // API key providers = all models
     case "ollama":
       return "free"; // Local = all models (all marked free)
     default:

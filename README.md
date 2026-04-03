@@ -6,11 +6,11 @@
   > ^ <
 ```
 
-Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, auto-login, and automatic fallback.
+Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, auto-detect login, and automatic fallback.
 
-> **Disclaimer:** Cat's Claw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, Google, Groq, or OpenRouter. Claude, GPT, Gemini, and related names are trademarks of their respective owners.
+> **Disclaimer:** Cat's Claw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, or Google. Claude, GPT, Gemini, and related names are trademarks of their respective owners.
 
-## Architecture Flow
+## Architecture
 
 ```
                          paw (CLI)
@@ -22,104 +22,81 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                                         │
                                   ┌─────┴─────┐
                                   │ Auto-Detect│
-                                  │  ┌────────┐│
-                                  │  │Claude  ││  ~/.claude/.credentials.json
-                                  │  │Codex   ││  ~/.codex/auth.json
-                                  │  │API Key ││  ~/.cats-claw/credentials.json
-                                  │  │.env    ││  .env
-                                  │  └────────┘│
+                                  │  Claude    │  ~/.claude/.credentials.json
+                                  │  Codex CLI │  codex --version
+                                  │  API Key   │  ~/.cats-claw/credentials.json
+                                  │  Ollama    │  localhost:11434
                                   └─────┬─────┘
                                         │
                               ┌─────────┼─────────┐
                               │  Init (parallel)   │
-                              │  ┌──────┬────────┐ │
-                              │  │ MCP  │  Team  │ │
-                              │  │.mcp  │ detect │ │
-                              │  │.json │ score  │ │
-                              │  └──────┴────────┘ │
+                              │  MCP + Team detect │
                               └─────────┬─────────┘
                                         │
                                   ┌─────┴─────┐
                                   │   REPL     │
-                                  │  (Ink UI)  │
                                   └─────┬─────┘
                                         │
                           ┌─────────────┼─────────────┐
                           │             │             │
                     /commands      Solo Mode      Team Mode
-                    (13 cmds)         │               │
-                                      ▼               ▼
-                              ┌──────────┐    ┌──────────────┐
-                              │ Provider │    │Plan → Code → │
-                              │   API    │    │[Review+Test] │
-                              │   Call   │    │  → Optimize  │
-                              └────┬─────┘    └──────┬───────┘
-                                   │                 │
-                              ┌────┴────┐      ┌─────┴─────┐
-                              │  Tools  │      │ Parallel   │
-                              │(8 built │      │ Execution  │
-                              │ + MCP)  │      │ + Fallback │
-                              └────┬────┘      └─────┬─────┘
-                                   │                 │
-                                   └────────┬────────┘
-                                            │
-                                      ┌─────┴─────┐
-                                      │ Response   │
-                                      │ + Usage    │
-                                      │ + Status   │
-                                      └───────────┘
+                          │             │               │
+                          │      ┌──────┴──┐    ┌──────┴───────┐
+                          │      │Provider │    │Plan → Code → │
+                          │      │  Call   │    │[Review+Test] │
+                          │      └────┬────┘    │  → Optimize  │
+                          │           │         └──────┬───────┘
+                          │      ┌────┴────┐          │
+                          │      │ 8 Tools │          │
+                          │      │ + MCP   │          │
+                          │      └────┬────┘          │
+                          │           └────────┬──────┘
+                          │                    │
+                          │             ┌──────┴──────┐
+                          │             │  Response   │
+                          └────────────▶│  + Status   │
+                                        └─────────────┘
 ```
 
-### Fallback Flow
+### Fallback
 
 ```
-Provider API Call
-    │
-    ├─ Success → Response
-    │
-    └─ Error (429/401/quota) → Try Next Provider
-                                    │
-                                    ├─ Success → [Fallback: provider] + Response
-                                    │
-                                    └─ Error → Try Next → ... → Ollama (local, last resort)
+Provider Call → Success → Response
+      │
+      └─ Error (429/401/quota) → Next Provider → ... → Ollama (last resort)
 ```
 
 ### Team Pipeline
 
 ```
-  ┌──────────┐     ┌──────────┐     ┌──────────┐  ┌──────────┐     ┌──────────┐
-  │ PLANNER  │────▶│  CODER   │────▶│ REVIEWER  │  │  TESTER  │────▶│OPTIMIZER │
-  │(reason)  │     │(implement│     │(bugs,sec) │  │(tests)   │     │(perf,dx) │
-  │          │     │          │     └──────────┘  └──────────┘     │          │
-  │sequential│     │sequential│      parallel ◀──▶ parallel        │sequential│
-  └──────────┘     └──────────┘                                    └──────────┘
+Plan(sequential) → Code(sequential) → [Review + Test](parallel) → Optimize(sequential)
 
-  Provider assignment (example with 3 providers):
-  ┌─────────────────────────────────────────────┐
-  │ anthropic → planner (10), reviewer (9)      │
-  │ ollama    → coder (unique spread)           │
-  │ codex     → tester (9), optimizer (8)       │
-  └─────────────────────────────────────────────┘
+Example with 3 providers:
+  anthropic → planner, reviewer, optimizer
+  codex     → coder (score: 9)
+  ollama    → tester (unique spread)
 ```
 
 ## Features
 
-- **Multi-provider** — Anthropic, Codex, Gemini, Groq, OpenRouter, Ollama
-- **Auto-detect** — No login prompt; auto-detects Claude login, Codex CLI, API keys, and .env
-- **Solo/Team mode** — Single provider or 5-agent collaboration pipeline in one terminal
-- **Arrow-key UI** — All panels use ↑↓ navigate, Enter select, Esc back
-- **MCP support** — Connect external tools via Model Context Protocol (stdio/http/sse)
-- **Auto-fallback** — Rate limit or quota error? Automatically tries next provider
-- **Plan-aware models** — Shows only models available for your plan (free/pro/max)
-- **Live model detection** — Ollama shows pulled models; cloud APIs show accessible models
-- **Live scoring** — Team roles auto-assigned by efficiency, adapts from real usage
+- **3 Providers** — Anthropic (Claude CLI), Codex (CLI), Ollama (local)
+- **Auto-detect** — No login prompt; finds Claude login, Codex CLI, Ollama automatically
+- **Solo/Team mode** — Single provider or 5-agent pipeline in one terminal
+- **Arrow-key UI** — All panels: ↑↓ navigate, Enter select, Esc back
+- **Effort levels** — Anthropic & Codex: low/medium/high/max (or extra_high)
+- **MCP support** — External tools via Model Context Protocol (stdio/http/sse)
+- **Auto-fallback** — Rate limit? Instantly tries next provider
+- **Plan-aware models** — Shows models based on your subscription (free/pro/max)
+- **Live Ollama detection** — Shows actually pulled models with sizes
 - **Usage tracking** — Per-provider token count with estimated cost
-- **Security hardened** — Command injection protection, SSRF blocking, symlink guards
+- **Korean IME** — Native stdin handling for smooth CJK input
+- **Security hardened** — Injection protection, SSRF blocking, symlink guards
 
 ## Requirements
 
 - Node.js 22+
 - npm
+- At least one provider: Claude Code, Codex CLI, or Ollama
 
 ## Installation
 
@@ -127,194 +104,128 @@ Provider API Call
 git clone https://github.com/jhcdev/cats-claw.git
 cd cats-claw
 npm install
-npm link               # Installs 'paw' command globally
+npm link    # Installs 'paw' command globally
 ```
-
-No `.env` required — Cat's Claw auto-detects your providers on startup.
 
 ## Quick Start
 
 ```bash
-# Auto-detect providers and start REPL
-paw
-
-# Use specific provider
-paw --provider ollama --model qwen3
-
-# Direct prompt (no REPL, auto-detects credentials)
-paw "explain this project"
-paw --provider codex "refactor this function"
-
-# Team mode prompt
-paw "/team implement JWT auth"
+paw                              # Auto-detect and start REPL
+paw --provider anthropic         # Force Anthropic
+paw --provider codex             # Force Codex
+paw --provider ollama            # Force Ollama
+paw "explain this project"       # Direct prompt, no REPL
+paw "/team implement JWT auth"   # Team mode prompt
 ```
-
-On first run, Cat's Claw automatically detects available providers:
-
-```
-=^.^= Auto-detected: anthropic/claude-sonnet-4-20250514
-```
-
-If nothing is detected, it opens the provider selection menu.
 
 ## Providers
 
-| Provider | Auth | Notes |
-|----------|------|-------|
-| Anthropic | API key or Claude login | Best reasoning/planning |
-| Codex | codex login (ChatGPT subscription) | Best coding, no API key |
-| Gemini | API key | Best long-context |
-| Groq | API key | Fastest inference |
-| OpenRouter | API key | Multi-model hub |
-| Ollama | (none) | Local, free |
+| Provider | Auth | How it works |
+|----------|------|-------------|
+| **Anthropic** | Claude Code login or API key | Runs `claude -p` CLI for login users, SDK for API keys |
+| **Codex** | `codex login` | Runs `codex exec` CLI, ChatGPT subscription |
+| **Ollama** | (none) | Connects to local Ollama server |
 
 ### Anthropic
 
-Use your Anthropic API key, or reuse an existing Claude Code session automatically.
+Auto-detected if Claude Code is installed. Uses `claude -p` (CLI mode) so there's no rate limit sharing with your active Claude Code session.
+
+```bash
+# Already logged in to Claude Code? Just run:
+paw
+# Or with API key in .env:
+# ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**Effort levels:** low, medium, high, max
 
 ### Codex
 
-Codex uses the [Codex CLI](https://github.com/openai/codex) (`codex exec`) with a ChatGPT subscription — no API key needed. Auto-detected via `codex --version`.
+Auto-detected if Codex CLI is installed. Uses `codex exec` with your ChatGPT subscription.
 
 ```bash
-# 1. Install Codex CLI
 npm install -g @openai/codex
-# 2. Log in with your ChatGPT account
 codex login
-# 3. Start Cat's Claw
 paw --provider codex
 ```
 
-Codex supports **effort levels** — select via `/model` after choosing a Codex model:
+**Effort levels:** low, medium (default), high, extra_high
 
-| Level | Description |
-|-------|-------------|
-| Low | Fast responses with lighter reasoning |
-| Medium (default) | Balances speed and reasoning depth |
-| High | Greater reasoning for complex problems |
-| Extra High | Maximum reasoning depth |
-
-```
-/model → Codex → gpt-5.4 → Select effort:
-  > Medium — Balanced speed and depth (default)
-    High — Greater reasoning for complex problems
-```
-
-### Gemini
-
-API key from [aistudio.google.com](https://aistudio.google.com/apikey). Best for long-context tasks.
-
-### Groq
-
-API key from [console.groq.com](https://console.groq.com). Fastest inference of the cloud providers.
-
-### OpenRouter
-
-API key from [openrouter.ai](https://openrouter.ai). Routes to dozens of models including open-source options.
+**Models:** GPT-5.4, GPT-5.4 Mini, GPT-5.3 Codex, GPT-5.3 Codex Spark, GPT-5.2 Codex, GPT-5.2, GPT-5.1 Codex Max/Mini, o4 Mini, o3
 
 ### Ollama (Local)
 
-Free, no account needed. Runs models on your machine.
+Free, no account. Runs models on your machine.
 
 ```bash
-# 1. Install from ollama.com/download
-# 2. Pull a model
 ollama pull qwen3
-# 3. Start Cat's Claw
 paw --provider ollama
 ```
 
-Hardware: 16GB RAM minimum, GPU recommended, 7B-8B models easiest to start.
+Hardware: 16GB RAM minimum, GPU recommended.
+
+### Coming Soon
+
+- **Gemini** — Google Gemini API (planned)
+- **Groq** — Fast inference (planned)
+- **OpenRouter** — Multi-model hub (planned)
 
 ### Provider Settings (`/settings`)
-
-Manage all providers from one panel — arrow keys to navigate:
 
 ```
 ╭─ Provider Settings ──────────────────╮
 │  > ● Anthropic (active)              │
 │    ● Codex                           │
-│    ○ Gemini                          │
-│    ○ Groq                            │
-│    ○ OpenRouter                      │
 │    ● Ollama (local)                  │
 │                                      │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
 ```
 
-Select a provider → choose auth method:
-
-```
-╭─ Configure Anthropic ────────────────╮
-│  > Use Claude Code login             │
-│    Enter API key manually            │
-│                                      │
-│  ↑↓ navigate  Enter select  Esc back │
-╰──────────────────────────────────────╯
-```
-
-- **Anthropic**: use Claude Code session or API key
-- **Codex**: use Codex CLI login (ChatGPT subscription)
-- **Others**: API key only
-- **Ollama**: no auth needed
-
-### Auto-Login
-
-Cat's Claw reuses existing sessions automatically on startup:
-
-| CLI Tool | Auth File | Provider |
-|----------|-----------|----------|
-| Claude Code | `~/.claude/.credentials.json` | Anthropic |
-| Codex CLI | `~/.codex/auth.json` | Codex |
+Configure providers, enter API keys, or use existing logins — all via arrow keys.
 
 ### Model Catalog (`/model`)
 
-Shows models filtered by your subscription plan. Ollama shows actually pulled models:
+Models filtered by your plan. Ollama shows actually pulled models:
 
 ```
 * anthropic (max):
-  1. claude-haiku-4-5-20251001 — Haiku 4.5
-  2. claude-sonnet-4-20250514 — Sonnet 4
-  3. claude-sonnet-4-6-20250725 — Sonnet 4.6
-  4. claude-opus-4-20250514 — Opus 4
-  5. claude-opus-4-6-20250725 — Opus 4.6
+  1. claude-haiku-4-5 — Haiku 4.5
+  2. claude-sonnet-4 — Sonnet 4
+  3. claude-sonnet-4-6 — Sonnet 4.6
+  4. claude-opus-4 — Opus 4
+  5. claude-opus-4-6 — Opus 4.6
 
-  codex (pro):
+  codex:
   1. gpt-5.4 — GPT-5.4 (default)
   2. gpt-5.4-mini — GPT-5.4 Mini
-  3. gpt-5.3-codex — GPT-5.3 Codex
-  4. gpt-5.3-codex-spark — GPT-5.3 Codex Spark
-  5. gpt-5.2-codex — GPT-5.2 Codex
-  6. gpt-5.2 — GPT-5.2
-  7. gpt-5.1-codex-max — GPT-5.1 Codex Max
-  8. gpt-5.1-codex-mini — GPT-5.1 Codex Mini
-  9. o4-mini — o4 Mini
-  10. o3 — o3
+  ...
 
 * ollama:
   1. qwen3:latest — qwen3:latest (8.2B)
 ```
 
-Switch by number or ID:
+After selecting a Codex or Anthropic model, choose effort level:
 
 ```
-/model anthropic 4        # Switch to Opus 4
-/model ollama 1           # Switch to qwen3
-/model codex gpt-5.4      # Switch by ID
+╭─ Select effort level ────────────────╮
+│    Low — Fast, lighter reasoning     │
+│  > Medium — Balanced (default)       │
+│    High — Complex problems           │
+│    Extra High — Maximum depth        │
+│  ↑↓ navigate  Enter select  Esc back │
+╰──────────────────────────────────────╯
 ```
 
 ## Modes
 
-One terminal, two modes. Switch freely anytime.
+One terminal, two modes. Switch anytime.
 
 ### Solo Mode (default)
 
-Single provider handles all messages.
-
 ```
-/mode solo              # Activate (default)
-/model gemini           # Switch provider
+/mode solo
+/model anthropic 4    # Switch to Opus 4
 ```
 
 ### Team Mode
@@ -322,7 +233,7 @@ Single provider handles all messages.
 5 agents collaborate on every message:
 
 ```
-/mode team              # Activate
+/mode team
 ```
 
 | Role | Job | Runs |
@@ -335,58 +246,30 @@ Single provider handles all messages.
 
 ### Team Dashboard (`/team`)
 
-Arrow-key interface for viewing and editing team configuration:
-
 ```
 ╭─ Team Dashboard ─────────────────────╮
 │  planner   anthropic/claude-sonnet-4 │
-│  coder     ollama/qwen3             │
+│  coder     codex/gpt-5.4            │
 │  reviewer  anthropic/claude-sonnet-4 │
-│  tester    codex/gpt-5.4            │
+│  tester    ollama/qwen3             │
 │  optimizer codex/gpt-5.4            │
 │                                      │
 │  > Edit role assignment              │
 │    Toggle mode (→ team)              │
-│                                      │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
 ```
 
-Edit role → pick role → pick provider (all arrow-key based).
-
-### Auto-Assignment
-
-Roles assigned by efficiency scores. Uses greedy unique-first to spread across providers. Scores adapt from real usage after 3+ runs per role.
-
-**Codex role scores:** planner 8, coder 9, reviewer 7, tester 9, optimizer 8
+Roles auto-assigned by efficiency scores. Adapts from real usage after 3+ runs.
 
 ### Automatic Fallback
 
-- **Solo**: provider fails → auto-tries next, shows `[Fallback: provider]`
-- **Team**: phase fails → retries with different provider
-- Ollama = ultimate local fallback (free, no rate limits)
-
-## Usage Tracking (`/status`)
-
-Per-provider token count with estimated cost:
+Provider fails → instantly tries next. Ollama = ultimate local fallback.
 
 ```
-Cat's Claw v1.0.0 | Mode: SOLO
-Active: anthropic/claude-sonnet-4
-
-Providers (3):
-  * anthropic — claude-sonnet-4
-    codex — gpt-5.4
-    ollama — qwen3
-
-Usage:
-  anthropic/claude-sonnet-4
-    2.1k in / 1.8k out / 3 req  ~$0.0333
-  ollama/qwen3
-    500 in / 300 out / 1 req  (free)
-
-  Total: 2.6k in / 2.1k out
-  Estimated cost:  ~$0.0333
+=^.^= grooming the code...
+[Fallback: codex/gpt-5.4]
+  Rate limit hit. Switched automatically.
 ```
 
 ## Tools (8 built-in)
@@ -394,80 +277,54 @@ Usage:
 | Tool | Description |
 |------|-------------|
 | `list_files` | List files and directories |
-| `read_file` | Read a text file (with size guard) |
+| `read_file` | Read a text file (size guard) |
 | `write_file` | Create or overwrite a file |
-| `edit_file` | Replace a unique string in a file |
-| `search_text` | Search patterns (no shell injection) |
-| `run_shell` | Shell commands (dangerous patterns blocked) |
+| `edit_file` | Replace a unique string |
+| `search_text` | Search patterns (no injection) |
+| `run_shell` | Shell commands (dangerous blocked) |
 | `glob` | Find files by pattern (ReDoS-safe) |
 | `web_fetch` | Fetch URL (SSRF-protected) |
 
 ## MCP (Model Context Protocol)
 
-### CLI Commands
+### CLI
 
 ```bash
-paw mcp add --transport http notion https://mcp.notion.com/mcp
-paw mcp add --transport sse asana https://mcp.asana.com/sse
 paw mcp add --transport http github https://api.github.com/mcp \
-  --header "Authorization:Bearer your-token"
-paw mcp add --transport stdio --env API_KEY=abc myserver -- npx -y @some/package
-paw mcp add-json weather '{"type":"http","url":"https://api.weather.com/mcp"}'
+  --header "Authorization:Bearer token"
+paw mcp add --transport stdio memory -- npx -y @modelcontextprotocol/server-memory
 paw mcp list
-paw mcp get notion
-paw mcp remove notion
+paw mcp remove github
 ```
 
-### Interactive Manager (`/mcp`)
-
-Arrow-key interface:
+### Interactive (`/mcp`)
 
 ```
 ╭─ MCP Server Manager ────────────────╮
 │  ● github — 12 tool(s)              │
 │  ● memory — 9 tool(s)               │
-│                                      │
 │  > Add server                        │
 │    Remove server                     │
 │    Back                              │
-│                                      │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
 ```
 
-Add: guided text input (name → command → args). Remove: arrow-select server. Failed connections show error and aren't saved.
-
-### Config File
-
-`.mcp.json` in project root:
-
-```json
-{
-  "mcpServers": {
-    "github": {
-      "type": "http",
-      "url": "https://api.github.com/mcp",
-      "headers": { "Authorization": "Bearer token" }
-    }
-  }
-}
-```
-
-Supports stdio, HTTP, SSE. MCP tools auto-injected into all providers.
+Supports stdio, HTTP, SSE. Tools auto-injected into all providers.
 
 ## REPL Commands
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show all commands |
-| `/status` | Providers, usage, cost overview |
-| `/settings` | Provider management panel (↑↓ select) |
-| `/model` | Model catalog & switch (↑↓ or number/ID) |
-| `/team` | Team dashboard & config (↑↓ select) |
+| `/status` | Providers, usage, cost |
+| `/settings` | Provider management (↑↓) |
+| `/model` | Model catalog & switch (↑↓) |
+| `/team` | Team dashboard (↑↓) |
 | `/ask <provider> <prompt>` | Query specific provider |
 | `/tools` | Built-in + MCP tools |
-| `/mcp` | MCP server manager (↑↓ select) |
-| `/git` | Git status + diff + log |
+| `/mcp` | MCP server manager (↑↓) |
+| `/git` | Status + diff + log |
 | `/history` | Export chat to markdown |
 | `/compact` | Compress conversation |
 | `/init` | Generate CONTEXT.md |
@@ -475,104 +332,90 @@ Supports stdio, HTTP, SSE. MCP tools auto-injected into all providers.
 | `/clear` | Reset conversation |
 | `/exit` | Quit |
 
-### Keyboard Shortcuts
+### Keyboard
 
 | Key | Action |
 |-----|--------|
-| `↑↓` | Navigate menus / autocomplete |
-| `Enter` | Select / confirm / execute autocomplete |
+| `↑↓` | Navigate menus |
+| `Enter` | Select / execute autocomplete |
+| `Tab` | Autocomplete (fill only) |
 | `Esc` | Go back / quit |
-| `Tab` | Autocomplete (fill input without executing) |
 | `Ctrl+L` | Clear conversation |
 | `Ctrl+K` | Compact conversation |
 
 ### Status Bar
 
-Always visible at the bottom:
-
 ```
-Anthropic/claude-sonnet-4  turns: 5  mcp: 2 server(s)  tokens: 4.2k
-TEAM/qwen3                 turns: 2  mcp: off           local
+Anthropic/claude-sonnet-4  turns: 5  mcp: 1 server(s)  tokens: 4.2k
+TEAM/gpt-5.4               turns: 2  mcp: off           local
 ```
 
 ## Security
 
-- Shell commands: dangerous patterns blocked (rm -rf /, etc.)
-- Search: no shell injection (uses execFile, not shell)
-- File access: symlink traversal protection (realpath check)
-- Web fetch: SSRF protection (blocks private IPs, metadata endpoints)
-- MCP: safe env allowlist (API keys not leaked to child processes)
-- Credentials: saved with mode 0600
-- Glob: ReDoS-safe regex conversion
+- Shell: dangerous patterns blocked
+- Search: no shell injection (execFile)
+- Files: symlink traversal protection
+- Web: SSRF blocked (private IPs, metadata)
+- MCP: safe env allowlist
+- Credentials: mode 0600
+- Glob: ReDoS-safe
 
-## File Locations
+## Files
 
 | File | Purpose |
 |------|---------|
-| `~/.cats-claw/credentials.json` | Saved API keys (mode 0600) |
-| `~/.cats-claw/team-scores.json` | Team performance scores |
-| `~/.cats-claw/mcp.json` | Global MCP config |
-| `.mcp.json` | Project-level MCP config |
-| `.env` | Environment variables (optional) |
-
-```bash
-paw --list              # Show saved credentials
-paw --logout            # Remove all saved keys
-paw --logout codex      # Remove specific provider key
-```
+| `~/.cats-claw/credentials.json` | API keys (0600) |
+| `~/.cats-claw/team-scores.json` | Team performance |
+| `.mcp.json` | MCP config |
+| `.env` | Environment (optional) |
 
 ## Examples
 
-### Solo Mode
+### Solo
 
 ```
 you  explain the structure of this project
 =^.^= says:
   This project has the following structure...
 
-you  /model gemini
-~ Switched to Gemini/gemini-2.5-flash
+you  /model codex 1
+~ codex/gpt-5.4 (effort: medium)
 
 you  /status
-~ Active: gemini/gemini-2.5-flash
-  Usage: 1.2k in / 900 out  ~$0.0007
+~ Active: codex/gpt-5.4
+  Usage: codex/gpt-5.4  500 in / 300 out  (free)
 ```
 
-### Team Mode
+### Team
 
 ```
 you  /mode team
-you  implement a JWT authentication system
+you  implement JWT auth
 
 =^.^= Planning (anthropic/claude-sonnet-4)...
-=^.^= Implementing (ollama/qwen3)...
+=^.^= Implementing (codex/gpt-5.4)...
 =^.^= Reviewing (anthropic/claude-sonnet-4)...
-=^.^= Testing (codex/gpt-5.4)...
+=^.^= Testing (ollama/qwen3)...
 =^.^= Optimizing (codex/gpt-5.4)...
-
---- PLANNER (3200ms) ---  --- CODER (8100ms) ---
---- REVIEWER (2800ms) --- --- TESTER (4200ms) ---
---- OPTIMIZER (3100ms) ---
 Total: 21400ms
 ```
 
-### Cross-Provider Query
+### Cross-Provider
 
 ```
-you  /ask gemini what's the time complexity?
-=^.^= [gemini] O(n log n) because...
+you  /ask codex refactor this function
+=^.^= [codex] Here's the refactored version...
 
-you  /ask codex any security issues?
-=^.^= [codex] SQL injection at line 42...
+you  /ask anthropic review this code
+=^.^= [anthropic] LGTM with one suggestion...
 ```
 
 ### Fallback
 
 ```
-you  refactor this module
-=^.^= grooming the code...
-[Fallback: ollama/qwen3]
-  Rate limit exceeded. Switched to Ollama automatically.
+you  analyze this codebase
+[Fallback: codex/gpt-5.4]
+  Anthropic rate limit. Switched automatically.
 ```
 
 ## License

@@ -138,9 +138,6 @@ export async function detectProviders(env: Record<string, string | undefined>): 
       }
     } catch {}
   }
-  check("gemini", "GEMINI_API_KEY", "GEMINI_MODEL", "gemini-2.5-flash");
-  check("groq", "GROQ_API_KEY", "GROQ_MODEL", "openai/gpt-oss-20b", "https://api.groq.com/openai/v1");
-  check("openrouter", "OPENROUTER_API_KEY", "OPENROUTER_MODEL", "anthropic/claude-sonnet-4", env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1");
 
   // Codex CLI (no API key needed, uses its own auth)
   try {

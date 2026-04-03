@@ -14,21 +14,12 @@ const PRICING: Record<string, { input: number; output: number }> = {
   "claude-opus-4-20250514": { input: 15.00, output: 75.00 },
   // Codex (subscription-based, no per-token cost)
   "gpt-5.4": { input: 0, output: 0 },
-  // Gemini
-  "gemini-2.5-flash": { input: 0.15, output: 0.60 },
-  "gemini-2.5-pro": { input: 1.25, output: 10.00 },
-  // Groq (very cheap)
-  "openai/gpt-oss-20b": { input: 0.10, output: 0.10 },
-  "openai/gpt-oss-120b": { input: 0.30, output: 0.30 },
 };
 
 // Fallback pricing by provider
 const PROVIDER_DEFAULT_PRICING: Partial<Record<ProviderName, { input: number; output: number }>> = {
   anthropic: { input: 3.00, output: 15.00 },
   codex: { input: 0, output: 0 },
-  gemini: { input: 0.15, output: 0.60 },
-  groq: { input: 0.10, output: 0.10 },
-  openrouter: { input: 1.00, output: 5.00 },
 };
 
 export class UsageTracker {

@@ -122,9 +122,21 @@
   "hotPaths": [
     {
       "path": "src/cli.tsx",
-      "accessCount": 24,
-      "lastAccessed": 1775223632917,
+      "accessCount": 27,
+      "lastAccessed": 1775223955363,
       "type": "directory"
+    },
+    {
+      "path": "src/index.ts",
+      "accessCount": 5,
+      "lastAccessed": 1775223969716,
+      "type": "file"
+    },
+    {
+      "path": "src/model-catalog.ts",
+      "accessCount": 4,
+      "lastAccessed": 1775224041233,
+      "type": "file"
     },
     {
       "path": "src/agent.ts",
@@ -139,9 +151,69 @@
       "type": "directory"
     },
     {
+      "path": "src/config.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775223933301,
+      "type": "file"
+    },
+    {
+      "path": "src/auth.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775223987215,
+      "type": "file"
+    },
+    {
       "path": "src/providers/claude-cli.ts",
       "accessCount": 2,
       "lastAccessed": 1775223090129,
+      "type": "file"
+    },
+    {
+      "path": "src/types.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775223918966,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/index.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775223944757,
+      "type": "file"
+    },
+    {
+      "path": "src/multi-provider.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775223998050,
+      "type": "file"
+    },
+    {
+      "path": "src/team.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775224047676,
+      "type": "file"
+    },
+    {
+      "path": "src/usage-tracker.ts",
+      "accessCount": 2,
+      "lastAccessed": 1775224058417,
+      "type": "file"
+    },
+    {
+      "path": ".env.example",
+      "accessCount": 2,
+      "lastAccessed": 1775224063100,
+      "type": "file"
+    },
+    {
+      "path": "src/providers/gemini.ts",
+      "accessCount": 1,
+      "lastAccessed": 1775223914230,
+      "type": "file"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 1,
+      "lastAccessed": 1775224180833,
       "type": "file"
     }
   ],

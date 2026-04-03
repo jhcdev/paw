@@ -28,9 +28,6 @@ async function saveCredentials(creds: StoredCredentials): Promise<void> {
 const PROVIDERS: { name: ProviderName; label: string; emoji: string; description: string; defaultModel: string; needsKey: boolean }[] = [
   { name: "anthropic", label: "Anthropic", emoji: "~", description: "Claude models (API key or Claude login)", defaultModel: "claude-sonnet-4-20250514", needsKey: true },
   { name: "codex", label: "Codex", emoji: "~", description: "Codex CLI models (codex login)", defaultModel: "gpt-5.4", needsKey: false },
-  { name: "gemini", label: "Gemini", emoji: "~", description: "Google Gemini (strong long-context)", defaultModel: "gemini-2.5-flash", needsKey: true },
-  { name: "groq", label: "Groq", emoji: "~", description: "Fast inference, open models", defaultModel: "openai/gpt-oss-20b", needsKey: true },
-  { name: "openrouter", label: "OpenRouter", emoji: "~", description: "Multi-model hub, max flexibility", defaultModel: "anthropic/claude-sonnet-4", needsKey: true },
   { name: "ollama", label: "Ollama", emoji: "~", description: "Local models, no key needed", defaultModel: "qwen3", needsKey: false },
 ];
 
@@ -191,8 +188,6 @@ export async function listSavedProviders(): Promise<void> {
 
 function resolveBaseUrl(provider: ProviderName): string | undefined {
   switch (provider) {
-    case "groq": return "https://api.groq.com/openai/v1";
-    case "openrouter": return process.env.OPENROUTER_BASE_URL?.trim() || "https://openrouter.ai/api/v1";
     case "ollama": return process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434";
     default: return undefined;
   }
