@@ -175,8 +175,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const result = agent.switchProvider(modelPanelProvider as any, selected.id);
           if (result.ok) {
             setProviderVersion((v) => v + 1);
-            if (modelPanelProvider === "codex") {
-              // Show effort picker for Codex
+            if (modelPanelProvider === "codex" || modelPanelProvider === "anthropic") {
+              // Show effort picker for CLI-based providers
               setModelPanel("effort");
               setModelCursor(1); // default = medium (index 1)
               return;
@@ -198,8 +198,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (key.upArrow) { setModelCursor((i) => Math.max(i - 1, 0)); return; }
       if (key.return) {
         const selected = efforts[modelCursor]!;
-        agent.setCodexEffort(selected);
-        setEntries((c) => [...c, { role: "system", text: `Codex: ${agent.getActiveModel()} (effort: ${selected})` }]);
+        agent.setEffort(selected);
+        setEntries((c) => [...c, { role: "system", text: `${agent.getActiveProvider()}/${agent.getActiveModel()} (effort: ${selected})` }]);
         setModelPanel("off");
         return;
       }
@@ -898,7 +898,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
           {modelPanel === "effort" ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text color="gray" italic>Select effort level for <Text bold color="#ffb088">Codex/{agent.getActiveModel()}</Text>:</Text>
+              <Text color="gray" italic>Select effort level for <Text bold color="#ffb088">{agent.getActiveProvider()}/{agent.getActiveModel()}</Text>:</Text>
               {(["Low — Fast responses, lighter reasoning", "Medium — Balanced speed and depth (default)", "High — Greater reasoning for complex problems", "Extra High — Maximum reasoning depth"] as const).map((label, i) => (
                 <Box key={label}>
                   <Text color={i === modelCursor ? "#ff9c73" : "gray"} bold={i === modelCursor}>

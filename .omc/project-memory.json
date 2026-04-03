@@ -1,0 +1,124 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1775222911196,
+  "projectRoot": "/home/dev/cats-claw",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": ">=22",
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "react",
+        "version": "19.2.4",
+        "category": "frontend"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": "Node.js 22"
+  },
+  "build": {
+    "buildCommand": "npm run build",
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": "npm run dev",
+    "scripts": {
+      "build": "tsc -p tsconfig.json",
+      "check": "tsc --noEmit -p tsconfig.json",
+      "dev": "tsx src/index.ts",
+      "start": "tsx src/index.ts"
+    }
+  },
+  "conventions": {
+    "namingStyle": "camelCase/PascalCase",
+    "importStyle": "ES modules",
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "bin",
+      "src",
+      "tests"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "bin": {
+      "path": "bin",
+      "purpose": "Executable scripts",
+      "fileCount": 1,
+      "lastAccessed": 1775222911186,
+      "keyFiles": [
+        "paw"
+      ]
+    },
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 2,
+      "lastAccessed": 1775222911187,
+      "keyFiles": [
+        "app.js",
+        "tsconfig.tsbuildinfo"
+      ]
+    },
+    "shared": {
+      "path": "shared",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1775222911190,
+      "keyFiles": []
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 14,
+      "lastAccessed": 1775222911191,
+      "keyFiles": [
+        "agent.ts",
+        "auth.ts",
+        "claude-auth.ts",
+        "cli.tsx",
+        "config.ts"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 0,
+      "lastAccessed": 1775222911192,
+      "keyFiles": []
+    },
+    "dist/src": {
+      "path": "dist/src",
+      "purpose": "Source code",
+      "fileCount": 30,
+      "lastAccessed": 1775222911193,
+      "keyFiles": [
+        "agent.d.ts",
+        "agent.js",
+        "auth.d.ts"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

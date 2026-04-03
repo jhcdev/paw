@@ -123,13 +123,13 @@ export class CodingAgent {
     return this.currentModel;
   }
 
-  setCodexEffort(effort: string): void {
+  setEffort(effort: string): void {
     if ("setEffort" in this.provider && typeof (this.provider as any).setEffort === "function") {
       (this.provider as any).setEffort(effort);
     }
   }
 
-  getCodexEffort(): string {
+  getEffort(): string {
     if ("getEffort" in this.provider && typeof (this.provider as any).getEffort === "function") {
       return (this.provider as any).getEffort();
     }

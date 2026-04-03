@@ -1,7 +1,0 @@
-{
-  "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"echo \\\"=== Test 3: Codex (CLI) ===\\\" && timeout 120 node --import=tsx/esm src/index.ts --provider codex --model gpt-5.4 \\\"say hello in one sentence\\\" 2>&1 | grep -v \\\"Connecting\\\\|Knowledg...",
-  "error": "Exit code 143\n=== Test 3: Codex (CLI) ===\nTerminated",
-  "timestamp": "2026-04-03T13:15:48.473Z",
-  "retry_count": 1
-}
