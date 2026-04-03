@@ -447,7 +447,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           return;
         }
         if (!agent.getTeam().isReady()) {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Team mode needs at least 2 providers configured.\nSet API keys in .env for multiple providers (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.)" }]);
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No providers configured for team mode.\nSet API keys in .env or use Ollama." }]);
           return;
         }
         setEntries((c) => [...c, { role: "user", text: line }]);

@@ -136,7 +136,7 @@ export class TeamRunner {
     return Array.from(this.agents.entries()).map(([role, a]) => ({ role, provider: a.provider, model: a.model }));
   }
 
-  isReady(): boolean { return this.agents.size >= 2; }
+  isReady(): boolean { return this.agents.has("coder"); }
 
   private getOrCreate(role: AgentRole): LlmProvider {
     const agent = this.agents.get(role);

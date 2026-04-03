@@ -124,8 +124,35 @@ async function main(): Promise<void> {
   await Promise.all([agent.initMcp(args.cwd), agent.initTeam()]);
 
   if (args.prompt) {
-    const result = await agent.runTurn(args.prompt);
-    process.stdout.write(`${result.text}\n`);
+    // Handle /team in one-shot mode
+    if (args.prompt.startsWith("/team ")) {
+      const teamPrompt = args.prompt.slice(6).trim();
+      if (!agent.getTeam().isReady()) {
+        process.stderr.write(`${pc.red("Error:")} No providers configured for team mode.\n`);
+      } else {
+        const result = await agent.getTeam().run(teamPrompt, (phase, provider, model) => {
+          process.stdout.write(`${pc.gray(`=^.^= ${phase} (${provider}/${model})...`)}\n`);
+        });
+        for (const p of result.phases) {
+          process.stdout.write(`\n${pc.cyan(`--- ${p.role.toUpperCase()} (${p.provider}/${p.model}, ${p.ms}ms) ---`)}\n`);
+          process.stdout.write(`${p.text}\n`);
+        }
+        process.stdout.write(`\n${pc.gray(`Total: ${result.totalMs}ms`)}\n`);
+      }
+    } else if (args.prompt.startsWith("/ask ")) {
+      const parts = args.prompt.slice(5).trim().split(/\s+/);
+      const target = parts[0] as ProviderName;
+      const askPrompt = parts.slice(1).join(" ");
+      if (!target || !askPrompt) {
+        process.stderr.write(`Usage: /ask <provider> <prompt>\n`);
+      } else {
+        const result = await agent.getMulti().ask(target, askPrompt);
+        process.stdout.write(`[${target}] ${result.text}\n`);
+      }
+    } else {
+      const result = await agent.runTurn(args.prompt);
+      process.stdout.write(`${result.text}\n`);
+    }
     await agent.shutdown();
     return;
   }

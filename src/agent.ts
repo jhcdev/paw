@@ -33,6 +33,9 @@ export class CodingAgent {
   }
 
   async initTeam(): Promise<void> {
+    // Ensure dotenv is loaded before detecting
+    const { config: loadEnv } = await import("dotenv");
+    loadEnv({ quiet: true });
     const detected = detectProviders(process.env as Record<string, string | undefined>);
     const teamConfig = await autoConfigureTeam(detected);
     this.team.configure(teamConfig);
