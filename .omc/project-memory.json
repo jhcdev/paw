@@ -121,6 +121,12 @@
   },
   "hotPaths": [
     {
+      "path": "src/cli.tsx",
+      "accessCount": 4,
+      "lastAccessed": 1775223303561,
+      "type": "directory"
+    },
+    {
       "path": "src/agent.ts",
       "accessCount": 3,
       "lastAccessed": 1775222970996,
@@ -137,12 +143,6 @@
       "accessCount": 2,
       "lastAccessed": 1775223090129,
       "type": "file"
-    },
-    {
-      "path": "src/cli.tsx",
-      "accessCount": 2,
-      "lastAccessed": 1775223231196,
-      "type": "directory"
     }
   ],
   "userDirectives": []
