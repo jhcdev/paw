@@ -6,9 +6,9 @@
   > ^ <
 ```
 
-Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, session sync, and automatic fallback.
+Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, session sync, skills, hooks, and automatic fallback.
 
-> **Disclaimer:** Cat's Claw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, or Google. Claude, GPT, Gemini, and related names are trademarks of their respective owners.
+> **Disclaimer:** Cat's Claw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by OpenAI or any AI provider. Codex, GPT, and related names are trademarks of their respective owners.
 
 ## Architecture
 
@@ -22,16 +22,15 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                                          │
                                    ┌─────┴─────┐
                                    │ Auto-Detect│
-                                   │  Claude CLI│
                                    │  Codex CLI │
                                    │  Ollama    │
-                                   │  API Key   │
                                    └─────┬─────┘
                                          │
                                ┌─────────┼─────────┐
                                │  Init (parallel)   │
                                │  MCP + Team detect │
                                │  + Session restore │
+                               │  + Hooks load      │
                                └─────────┬─────────┘
                                          │
                                    ┌─────┴─────┐
@@ -57,6 +56,7 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                            │             ┌──────┴──────┐
                            └────────────▶│  Response   │
                                          │  + Session  │
+                                         │  + Hooks    │
                                          │  + Sync     │
                                          └─────────────┘
 ```
@@ -74,23 +74,24 @@ Provider Call → Success → Response
 ```
 Plan(sequential) → Code(sequential) → [Review + Test](parallel) → Optimize(sequential)
 
-Example:  anthropic → planner, reviewer, optimizer
-          codex     → coder (score: 9)
+Example:  codex     → planner, coder (score: 9)
           ollama    → tester (unique spread)
+          codex     → reviewer, optimizer
 ```
 
 ## Features
 
-- **3 Providers** — Anthropic (Claude CLI), Codex (CLI), Ollama (local)
-- **Auto-detect** — No login prompt; finds Claude login, Codex CLI, Ollama automatically
+- **2 Providers** — Codex (CLI), Ollama (local)
+- **Auto-detect** — No login prompt; finds Codex CLI and Ollama automatically
 - **Solo/Team mode** — Single provider or 5-agent pipeline in one terminal
 - **Session sync** — Conversations persist and sync across terminals in real-time (fs.watch)
 - **Resume** — `--continue` or `--session <id>` to pick up where you left off
 - **Arrow-key UI** — All panels: ↑↓ navigate, Enter select, Esc back
-- **Effort levels** — Anthropic & Codex: low/medium/high/max (configurable per model and per team role)
+- **Effort levels** — Codex: low/medium/high/max (configurable per model and per team role)
 - **MCP support** — External tools via Model Context Protocol (stdio/http/sse)
+- **Skills** — 7 built-in slash commands + user/project custom skills
+- **Hooks** — Event-driven automation: pre-turn, post-turn, pre-tool, post-tool, on-error, session-start, session-end
 - **Auto-fallback** — Rate limit? Instantly tries next provider
-- **Plan-aware models** — Shows models based on your subscription (free/pro/max)
 - **Live Ollama detection** — Shows actually pulled models with sizes
 - **Usage tracking** — Per-provider token count with estimated cost
 - **Korean IME** — Native stdin handling for smooth CJK input
@@ -101,7 +102,7 @@ Example:  anthropic → planner, reviewer, optimizer
 
 - Node.js 22+
 - npm
-- At least one: Claude Code, Codex CLI, or Ollama
+- At least one: Codex CLI or Ollama
 
 ## Installation
 
@@ -116,7 +117,6 @@ npm link    # Installs 'paw' command globally
 
 ```bash
 paw                                # Auto-detect and start REPL
-paw --provider anthropic           # Force Anthropic
 paw --provider codex               # Force Codex
 paw --provider ollama              # Force Ollama
 paw "explain this project"         # Direct prompt, no REPL
@@ -130,20 +130,8 @@ paw --session abc123               # Join specific session
 
 | Provider | Auth | How it works |
 |----------|------|-------------|
-| **Anthropic** | Claude Code login or API key | Runs `claude -p` (no rate limit sharing with active session) |
 | **Codex** | `codex login` | Runs `codex exec` with ChatGPT subscription |
 | **Ollama** | (none) | Connects to local Ollama server |
-
-### Anthropic
-
-Auto-detected if Claude Code is installed. Uses CLI mode so your active Claude Code session's rate limit is not affected.
-
-```bash
-paw                        # Auto-detects Claude login
-paw --provider anthropic   # Or explicit
-```
-
-Effort: low, medium, high, max
 
 ### Codex
 
@@ -172,6 +160,7 @@ Hardware: 16GB RAM minimum, GPU recommended.
 
 ### Coming Soon
 
+- **Anthropic** — Claude models via [jhcdev/cats-claw-anthropic](https://github.com/jhcdev/cats-claw-anthropic) plugin
 - **Gemini** — Google Gemini API
 - **Groq** — Fast inference
 - **OpenRouter** — Multi-model hub
@@ -197,17 +186,116 @@ Terminal B: paw --session abc123
 → Both see the same conversation, synced in real-time
 ```
 
-### REPL Commands
-
-```
-/sessions     # List past sessions with preview
-/session      # Show current session ID
-/compact      # Compress conversation (keeps recent summary)
-```
-
 ### Session Files
 
 Stored in `~/.cats-claw/sessions/{id}.json` (mode 0600).
+
+## Skills
+
+Skills are slash commands that prepend a focused prompt to your message.
+
+### Built-in Skills (7)
+
+| Skill | Description |
+|-------|-------------|
+| `/review` | Review code for bugs, security, and best practices |
+| `/refactor` | Suggest refactoring improvements |
+| `/test` | Generate test cases |
+| `/explain` | Explain code in detail |
+| `/optimize` | Optimize code for performance |
+| `/document` | Generate documentation |
+| `/commit` | Generate a conventional commit message from git diff |
+
+### Using Skills
+
+```
+you  /review src/auth.ts
+you  /commit
+you  /explain this function
+```
+
+### Custom Skills
+
+Create user-wide or project-scoped skills as JSON files:
+
+**User skill** — `~/.cats-claw/skills/deploy.json`:
+```json
+{
+  "name": "deploy",
+  "description": "Check deployment readiness",
+  "prompt": "Review this code for production deployment: check env vars, error handling, logging, and security."
+}
+```
+
+**Project skill** — `.cats-claw/skills/style.json`:
+```json
+{
+  "name": "style",
+  "description": "Enforce project style guide",
+  "prompt": "Review this code against our style guide: 2-space indent, no var, prefer const, JSDoc on exports."
+}
+```
+
+Skills load automatically on startup. Use `/skills` to list all available skills.
+
+## Hooks
+
+Hooks let you run shell commands at specific points in the REPL lifecycle.
+
+### Events
+
+| Event | When |
+|-------|------|
+| `pre-turn` | Before sending a message to the model |
+| `post-turn` | After the model responds |
+| `pre-tool` | Before a tool is executed |
+| `post-tool` | After a tool finishes |
+| `on-error` | When any error occurs |
+| `session-start` | When the REPL session starts |
+| `session-end` | When the REPL session ends |
+
+### Configuration
+
+Create `.cats-claw/hooks.json` in your project (or `~/.cats-claw/hooks.json` for user-wide hooks):
+
+```json
+{
+  "hooks": [
+    {
+      "name": "log-turns",
+      "event": "post-turn",
+      "command": "echo 'Turn complete' >> ~/.cats-claw/activity.log"
+    },
+    {
+      "name": "lint-on-tool",
+      "event": "post-tool",
+      "command": "npm run lint --silent 2>/dev/null || true",
+      "timeout": 15000
+    },
+    {
+      "name": "notify-start",
+      "event": "session-start",
+      "command": "notify-send 'Cat\\'s Claw' 'Session started'"
+    },
+    {
+      "name": "git-status",
+      "event": "pre-turn",
+      "command": "git status --short"
+    }
+  ]
+}
+```
+
+### Context Variables
+
+Hooks receive environment variables:
+
+| Variable | Value |
+|----------|-------|
+| `CATS_CLAW_EVENT` | The event name |
+| `CATS_CLAW_CWD` | Current working directory |
+
+Use `{{key}}` placeholders in commands to interpolate context values. Hooks time out after 10s by default (configurable per hook via `timeout` in ms).
 
 ## Provider Settings (`/settings`)
 
@@ -215,8 +303,7 @@ Manage providers via arrow-key panel:
 
 ```
 ╭─ Provider Settings ──────────────────╮
-│  > ● Anthropic (active)              │
-│    ● Codex                           │
+│  > ● Codex (active)                  │
 │    ● Ollama (local)                  │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
@@ -230,21 +317,20 @@ Arrow-key panel showing plan-filtered models. Ollama shows actually pulled model
 
 ```
 ╭─ Model Selection ────────────────────╮
-│ Active: anthropic/claude-sonnet-4    │
+│ Active: codex/gpt-5.4                │
 │ Select provider:                     │
-│  > anthropic (max)                   │
-│    codex                             │
+│  > codex                             │
 │    ollama                            │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
          ↓ Enter
 ╭─ Select model ───────────────────────╮
-│  > claude-haiku-4-5 — Haiku 4.5     │
-│    claude-sonnet-4 — Sonnet 4 *      │
-│    claude-opus-4 — Opus 4            │
+│  > gpt-5.4 — GPT-5.4                │
+│    gpt-5.4-mini — GPT-5.4 Mini      │
+│    o4-mini — o4 Mini                 │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
-         ↓ Enter (Codex/Anthropic)
+         ↓ Enter (Codex)
 ╭─ Select effort ──────────────────────╮
 │    Low — Fast, lighter reasoning     │
 │  > Medium — Balanced (default)       │
@@ -254,7 +340,7 @@ Arrow-key panel showing plan-filtered models. Ollama shows actually pulled model
 ╰──────────────────────────────────────╯
 ```
 
-Direct command also works: `/model codex 3` or `/model anthropic opus`
+Direct command also works: `/model codex 3` or `/model ollama qwen3`
 
 ## Modes
 
@@ -288,9 +374,9 @@ Single provider handles all messages.
 
 ```
 ╭─ Team Dashboard ─────────────────────╮
-│  planner   anthropic/claude-sonnet-4 │
+│  planner   codex/gpt-5.4            │
 │  coder     codex/gpt-5.4            │
-│  reviewer  anthropic/claude-sonnet-4 │
+│  reviewer  codex/gpt-5.4            │
 │  tester    ollama/qwen3             │
 │  optimizer codex/gpt-5.4            │
 │                                      │
@@ -372,6 +458,8 @@ Supports stdio, HTTP, SSE. Tools auto-injected into all providers. Failed connec
 | `/settings` | Provider management (↑↓) |
 | `/model` | Model catalog & switch (↑↓) |
 | `/team` | Team dashboard (↑↓) |
+| `/skills` | List all skills (built-in + custom) |
+| `/hooks` | List loaded hooks and events |
 | `/ask <provider> <prompt>` | Query specific provider |
 | `/tools` | Built-in + MCP tools |
 | `/mcp` | MCP server manager (↑↓) |
@@ -399,7 +487,7 @@ Supports stdio, HTTP, SSE. Tools auto-injected into all providers. Failed connec
 ### Status Bar
 
 ```
-Anthropic/claude-sonnet-4  turns: 5  mcp: 1 server(s)  tokens: 4.2k
+Codex/gpt-5.4              turns: 5  mcp: 1 server(s)  tokens: 4.2k
 TEAM/gpt-5.4               turns: 2  mcp: off           local
 ```
 
@@ -412,7 +500,6 @@ TEAM/gpt-5.4               turns: 2  mcp: off           local
 - **MCP**: safe env allowlist (API keys not leaked to child processes)
 - **Credentials**: mode 0600
 - **Glob**: ReDoS-safe regex conversion
-- **Claude CLI**: IS_SANDBOX=1 for safe permissions
 
 ## Files
 
@@ -421,6 +508,10 @@ TEAM/gpt-5.4               turns: 2  mcp: off           local
 | `~/.cats-claw/credentials.json` | API keys (0600) |
 | `~/.cats-claw/sessions/*.json` | Session history (0600) |
 | `~/.cats-claw/team-scores.json` | Team performance |
+| `~/.cats-claw/skills/*.json` | User-wide custom skills |
+| `~/.cats-claw/hooks.json` | User-wide hooks |
+| `.cats-claw/skills/*.json` | Project-scoped custom skills |
+| `.cats-claw/hooks.json` | Project-scoped hooks |
 | `.mcp.json` | MCP config |
 | `.env` | Environment (optional) |
 
@@ -447,15 +538,40 @@ you  /status
   Usage: codex/gpt-5.4  500 in / 300 out  (free)
 ```
 
+### Skills
+
+```
+you  /review src/auth.ts
+=^.^= Reviewing for bugs, security, and best practices...
+
+you  /commit
+=^.^= feat(auth): add JWT token validation with expiry check
+
+you  /explain
+=^.^= This module handles...
+```
+
+### Hooks
+
+```bash
+# .cats-claw/hooks.json
+{
+  "hooks": [
+    { "event": "post-tool", "command": "npm test --silent", "name": "auto-test" }
+  ]
+}
+# → tests run automatically after every tool call
+```
+
 ### Team Mode
 
 ```
 you  /mode team
 you  implement JWT auth
 
-=^.^= Planning (anthropic/claude-sonnet-4)...
+=^.^= Planning (codex/gpt-5.4)...
 =^.^= Implementing (codex/gpt-5.4)...
-=^.^= Reviewing (anthropic/claude-sonnet-4)...
+=^.^= Reviewing (codex/gpt-5.4)...
 =^.^= Testing (ollama/qwen3)...
 =^.^= Optimizing (codex/gpt-5.4)...
 Total: 21400ms
@@ -476,15 +592,15 @@ paw --continue "what is the secret code?"
 you  /ask codex refactor this function
 =^.^= [codex] Here's the refactored version...
 
-you  /ask anthropic review this code
-=^.^= [anthropic] LGTM with one suggestion...
+you  /ask ollama review this code
+=^.^= [ollama] LGTM with one suggestion...
 ```
 
 ### Fallback
 
 ```
 you  analyze this codebase
-[Fallback: codex/gpt-5.4]
+[Fallback: ollama/qwen3]
   Rate limit hit. Switched automatically.
 ```
 
@@ -495,16 +611,18 @@ you  analyze this codebase
 1. **Initial release** — Multi-provider REPL with Ink UI, 8 tools, cat theme
 2. **MCP support** — stdio/HTTP/SSE transport, interactive manager, CLI commands
 3. **Team mode** — 5-agent pipeline with parallel execution, efficiency scoring
-4. **Auto-detect** — Claude/Codex login, no startup prompt needed
+4. **Auto-detect** — Codex login, no startup prompt needed
 5. **Arrow-key UI** — All panels redesigned for ↑↓ + Enter + Esc
 6. **Plan-aware models** — Subscription-based filtering, live Ollama detection
 7. **Codex provider** — Replaced OpenAI API with Codex CLI (ChatGPT subscription)
-8. **Claude CLI** — Runs `claude -p` instead of direct API (no rate limit sharing)
-9. **Effort levels** — Configurable per model and per team role
-10. **Sessions** — Auto-save, resume, real-time sync across terminals
-11. **Korean IME** — Native stdin handling, smooth CJK input
-12. **Security audit** — 14 vulnerabilities fixed (injection, SSRF, symlink, permissions)
-13. **`paw` CLI** — 3-character global command
+8. **Effort levels** — Configurable per model and per team role
+9. **Sessions** — Auto-save, resume, real-time sync across terminals
+10. **Korean IME** — Native stdin handling, smooth CJK input
+11. **Security audit** — 14 vulnerabilities fixed (injection, SSRF, symlink, permissions)
+12. **`paw` CLI** — 3-character global command
+13. **Anthropic removed** — Moved to separate plugin [jhcdev/cats-claw-anthropic](https://github.com/jhcdev/cats-claw-anthropic)
+14. **Skills system** — 7 built-in skills + user/project custom skills via JSON files
+15. **Hooks system** — Event-driven automation with 7 lifecycle events and shell command execution
 
 ## License
 
