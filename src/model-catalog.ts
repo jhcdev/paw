@@ -40,14 +40,16 @@ const CATALOG: Record<ProviderName, ModelInfo[]> = {
     // Free
     { id: "gpt-4o-mini", name: "GPT-4o Mini", tier: "fast", minPlan: "free" },
     { id: "gpt-4o", name: "GPT-4o", tier: "standard", minPlan: "free" },
-    // Pro
+    // Plus ($20/mo)
     { id: "gpt-5-nano", name: "GPT-5 Nano", tier: "fast", minPlan: "pro" },
     { id: "gpt-5-mini", name: "GPT-5 Mini", tier: "standard", minPlan: "pro" },
     { id: "o4-mini", name: "o4 Mini", tier: "standard", minPlan: "pro" },
     { id: "gpt-5.2", name: "GPT-5.2", tier: "strong", minPlan: "pro" },
-    // Max (Pro Plus)
-    { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", tier: "strong", minPlan: "max" },
-    { id: "o3", name: "o3", tier: "strong", minPlan: "max" },
+    // Pro ($200/mo) — highest consumer tier, all models
+    { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", tier: "strong", minPlan: "pro" },
+    { id: "o3", name: "o3", tier: "strong", minPlan: "pro" },
+    { id: "o3-pro", name: "o3 Pro", tier: "strong", minPlan: "pro" },
+    { id: "deep-research", name: "Deep Research", tier: "strong", minPlan: "pro" },
     // API only
     { id: "gpt-4.1", name: "GPT-4.1", tier: "standard", minPlan: "api" },
     { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", tier: "fast", minPlan: "api" },
