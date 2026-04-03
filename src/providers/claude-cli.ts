@@ -32,12 +32,13 @@ export class ClaudeCliProvider implements LlmProvider {
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
     return new Promise((resolve) => {
+      const isRoot = process.getuid?.() === 0;
       const args = [
         "-p",
         "--model", this.model,
         "--effort", this.effort,
         "--no-session-persistence",
-        "--dangerously-skip-permissions",
+        ...(isRoot ? [] : ["--dangerously-skip-permissions"]),
         prompt,
       ];
 

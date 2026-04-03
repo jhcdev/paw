@@ -125,6 +125,12 @@
       "accessCount": 3,
       "lastAccessed": 1775222970996,
       "type": "file"
+    },
+    {
+      "path": "src/providers/claude-cli.ts",
+      "accessCount": 1,
+      "lastAccessed": 1775223020834,
+      "type": "file"
     }
   ],
   "userDirectives": []
