@@ -121,36 +121,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
 
-    // MCP add modes — Escape goes back to list
-    if (mcpMode === "add-name" || mcpMode === "add-cmd" || mcpMode === "add-args") {
-      if (key.escape) { setMcpMode("list"); setInput(""); return; }
-      // Let TextInput handle all other keys
-      return;
-    }
-
-    // MCP mode keys
-    if (mcpMode === "list") {
-      if (key.escape || ch === "b" || ch === "q") { setMcpMode("off"); return; }
-      if (ch === "a") { setMcpMode("add-name"); setMcpAddName(""); setInput(""); return; }
-      if (ch === "r" && mcpServers.length > 0) { setMcpMode("remove"); setMcpCursor(0); return; }
-      return;
-    }
-    if (mcpMode === "remove") {
-      if (key.escape) { setMcpMode("list"); return; }
-      if (key.downArrow) { setMcpCursor((i) => Math.min(i + 1, mcpServers.length - 1)); return; }
-      if (key.upArrow) { setMcpCursor((i) => Math.max(i - 1, 0)); return; }
-      if (key.return) {
-        const srv = mcpServers[mcpCursor];
-        if (srv) {
-          agent.removeMcpServer(srv.name).then(() => {
-            agent.getMcpFullStatus().then((list) => {
-              setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
-              setMcpCursor(0);
-              setMcpMode("list");
-            });
-          });
-        }
+    // MCP modes — Escape goes back
+    if (mcpMode !== "off") {
+      if (key.escape) {
+        if (mcpMode === "list") { setMcpMode("off"); }
+        else if (mcpMode === "remove") { setMcpMode("list"); }
+        else { setMcpMode("list"); setInput(""); }
         return;
+      }
+      if (mcpMode === "remove") {
+        if (key.downArrow) { setMcpCursor((i) => Math.min(i + 1, mcpServers.length - 1)); return; }
+        if (key.upArrow) { setMcpCursor((i) => Math.max(i - 1, 0)); return; }
       }
       return;
     }
@@ -193,7 +174,28 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (!line || isBusy) return;
       setInput("");
 
-      // ── MCP add flow ──
+      // ── MCP mode submit flow ──
+      if (mcpMode === "list") {
+        const cmd = line.toLowerCase();
+        if (cmd === "a" || cmd === "add") { setMcpMode("add-name"); setInput(""); return; }
+        if ((cmd === "r" || cmd === "remove") && mcpServers.length > 0) { setMcpMode("remove"); setMcpCursor(0); setInput(""); return; }
+        if (cmd === "b" || cmd === "back" || cmd === "q" || !line) { setMcpMode("off"); setInput(""); return; }
+        setInput("");
+        return;
+      }
+      if (mcpMode === "remove") {
+        // Enter to confirm removal
+        const srv = mcpServers[mcpCursor];
+        if (srv) {
+          await agent.removeMcpServer(srv.name);
+          const list = await agent.getMcpFullStatus();
+          setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
+          setMcpCursor(0);
+        }
+        setMcpMode("list");
+        setInput("");
+        return;
+      }
       if (mcpMode === "add-name") {
         if (!line) { setMcpMode("list"); return; }
         setMcpAddName(line);
@@ -568,14 +570,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                 ))
               )}
               <Box marginTop={1} flexDirection="column">
-                <Text color="#cc8866">[a] Add server  [r] Remove server  [b] Back</Text>
+                <Text color="#cc8866">Type: <Text bold>a</Text>(dd) / <Text bold>r</Text>(emove) / <Text bold>b</Text>(ack) then Enter</Text>
               </Box>
             </Box>
           ) : null}
 
           {mcpMode === "remove" ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text color="gray" italic>Select server to remove (Enter to confirm, Esc to cancel):</Text>
+              <Text color="gray" italic>Select server to remove (arrows to move, Enter to confirm, Esc to cancel):</Text>
               {mcpServers.map((s, i) => (
                 <Box key={s.name}>
                   <Text color={i === mcpCursor ? "#ff9c73" : "gray"} bold={i === mcpCursor}>
