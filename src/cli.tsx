@@ -66,6 +66,9 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/log", desc: "recent commits" },
   { name: "/history", desc: "export conversation" },
   { name: "/compact", desc: "compress conversation" },
+  { name: "/init", desc: "generate project context" },
+  { name: "/doctor", desc: "diagnostics check" },
+  { name: "/version", desc: "show version" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
 ];
@@ -94,6 +97,29 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
   useInput((ch, key) => {
     if (key.ctrl && ch === "c") exit();
+
+    // Ctrl+L = clear
+    if (key.ctrl && ch === "l" && !isBusy && mcpMode === "off") {
+      agent.clear();
+      setTurnCount(0);
+      setEntries([{ role: "system", text: "Conversation cleared." }]);
+      return;
+    }
+
+    // Ctrl+K = compact
+    if (key.ctrl && ch === "k" && !isBusy && mcpMode === "off") {
+      agent.clear();
+      const summary = entries
+        .filter((e) => e.role === "assistant")
+        .slice(-3)
+        .map((e) => e.text.slice(0, 200))
+        .join("\n---\n");
+      setEntries([
+        { role: "system", text: "Conversation compacted. Recent context preserved." },
+        ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
+      ]);
+      return;
+    }
 
     // MCP mode keys
     if (mcpMode === "list") {
@@ -214,6 +240,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /log       - recent git commits",
             "  /history   - export conversation",
             "  /compact   - compress conversation",
+            "  /init      - generate project context",
+            "  /doctor    - diagnostics check",
+            "  /version   - show version",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -346,6 +375,85 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setEntries([
           { role: "system", text: "Conversation compacted. Recent context preserved." },
           ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
+        ]);
+        return;
+      }
+
+      // ── init ──
+      if (line === "/init") {
+        setEntries((c) => [...c, { role: "user", text: line }]);
+        setIsBusy(true);
+        setThinkMsg("scanning project...");
+        try {
+          const parts: string[] = ["# Project Context\n"];
+          // Package info
+          try {
+            const pkg = await fsPromises.readFile(path.join(options.cwd, "package.json"), "utf8");
+            const parsed = JSON.parse(pkg);
+            parts.push(`## ${parsed.name ?? "Project"}\n${parsed.description ?? ""}\n`);
+            if (parsed.scripts) parts.push(`### Scripts\n${Object.entries(parsed.scripts).map(([k, v]) => `- ${k}: ${v}`).join("\n")}\n`);
+            if (parsed.dependencies) parts.push(`### Dependencies\n${Object.keys(parsed.dependencies).join(", ")}\n`);
+          } catch {}
+          // Git info
+          try {
+            const { stdout: branch } = await execAsync("git branch --show-current", { cwd: options.cwd });
+            const { stdout: remote } = await execAsync("git remote get-url origin 2>/dev/null || echo 'none'", { cwd: options.cwd });
+            parts.push(`## Git\n- Branch: ${branch.trim()}\n- Remote: ${remote.trim()}\n`);
+          } catch {}
+          // File tree (top level)
+          try {
+            const { stdout: tree } = await execAsync("find . -maxdepth 2 -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/dist/*' | head -50", { cwd: options.cwd });
+            parts.push(`## Structure\n\`\`\`\n${tree.trim()}\n\`\`\`\n`);
+          } catch {}
+          const content = parts.join("\n");
+          await fsPromises.writeFile(path.join(options.cwd, "CONTEXT.md"), content, "utf8");
+          setEntries((c) => [...c, { role: "system", text: "Generated CONTEXT.md with project overview." }]);
+        } catch (err) {
+          setEntries((c) => [...c, { role: "system", text: `Init failed: ${err instanceof Error ? err.message : String(err)}` }]);
+        } finally {
+          setIsBusy(false);
+        }
+        return;
+      }
+
+      // ── doctor ──
+      if (line === "/doctor") {
+        const checks: string[] = [];
+        // Node version
+        checks.push(`Node: ${process.version}`);
+        checks.push(`Platform: ${process.platform} ${process.arch}`);
+        checks.push(`CWD: ${options.cwd}`);
+        checks.push(`Provider: ${PROVIDER_LABELS[options.provider] ?? options.provider}`);
+        checks.push(`Model: ${options.model}`);
+        // Git
+        try {
+          const { stdout } = await execAsync("git --version", { cwd: options.cwd });
+          checks.push(`Git: ${stdout.trim()}`);
+        } catch { checks.push("Git: not found"); }
+        // ripgrep
+        try {
+          const { stdout } = await execAsync("rg --version | head -1", { cwd: options.cwd });
+          checks.push(`Ripgrep: ${stdout.trim()}`);
+        } catch { checks.push("Ripgrep: not found (using grep fallback)"); }
+        // MCP
+        const mcpStatus = agent.getMcpStatus();
+        checks.push(`MCP servers: ${mcpStatus.length} connected`);
+        // Token usage
+        const usage = agent.getUsage();
+        checks.push(`Tokens used: ${usage.inputTokens + usage.outputTokens}`);
+
+        setEntries((c) => [...c,
+          { role: "user", text: line },
+          { role: "system", text: `Diagnostics:\n${checks.map(c => "  " + c).join("\n")}` },
+        ]);
+        return;
+      }
+
+      // ── version ──
+      if (line === "/version") {
+        setEntries((c) => [...c,
+          { role: "user", text: line },
+          { role: "system", text: "Cat's Claw v1.0.0" },
         ]);
         return;
       }
@@ -512,6 +620,16 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         <TextInput value={input} onChange={(v) => { setInput(v); setSelectedIdx(0); }} onSubmit={submit} />
       </Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
+      <Box marginTop={0} paddingX={1} justifyContent="space-between">
+        <Text color="gray">{providerLabel}/{options.model}</Text>
+        <Text color="gray">turns: {turnCount}</Text>
+        <Text color={agent.getMcpStatus().length > 0 ? "green" : "gray"}>
+          mcp: {agent.getMcpStatus().length > 0 ? `${agent.getMcpStatus().length} server(s)` : "off"}
+        </Text>
+        <Text color="gray">
+          {options.provider !== "ollama" ? `tokens: ${formatTokens(agent.getUsage().inputTokens + agent.getUsage().outputTokens)}` : "local"}
+        </Text>
+      </Box>
     </Box>
   );
 }

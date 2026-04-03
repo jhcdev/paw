@@ -2,3 +2,7 @@
 {"t":0,"agent":"a1be90d","agent_type":"executor","event":"agent_start","parent_mode":"none"}
 {"t":0,"agent":"ab10f55","agent_type":"executor","event":"agent_stop","success":true,"duration_ms":42401}
 {"t":0,"agent":"a1be90d","agent_type":"executor","event":"agent_stop","success":true,"duration_ms":76213}
+{"t":0,"agent":"afb9772","agent_type":"executor","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"ac6885d","agent_type":"executor","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"afb9772","agent_type":"executor","event":"agent_stop","success":true,"duration_ms":25413}
+{"t":0,"agent":"ac6885d","agent_type":"executor","event":"agent_stop","success":true,"duration_ms":42601}
