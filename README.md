@@ -45,7 +45,7 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                           ┌─────────────┼─────────────┐
                           │             │             │
                     /commands      Solo Mode      Team Mode
-                    (18 cmds)         │               │
+                    (13 cmds)         │               │
                                       ▼               ▼
                               ┌──────────┐    ┌──────────────┐
                               │ Provider │    │Plan → Code → │
@@ -63,8 +63,8 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                                             │
                                       ┌─────┴─────┐
                                       │ Response   │
+                                      │ + Usage    │
                                       │ + Status   │
-                                      │   Bar      │
                                       └───────────┘
 ```
 
@@ -104,10 +104,12 @@ Provider API Call
 
 - **Multi-provider** — Anthropic, OpenAI, Gemini, Groq, OpenRouter, Ollama
 - **Auto-login** — Reuse Claude (`~/.claude/.credentials.json`) and Codex (`~/.codex/auth.json`) sessions
-- **Solo/Team mode** — Single provider or 5-agent collaboration pipeline
+- **Solo/Team mode** — Single provider or 5-agent collaboration pipeline in one terminal
 - **MCP support** — Connect external tools via Model Context Protocol (stdio/http/sse)
 - **Auto-fallback** — Rate limit or quota error? Automatically tries next provider
 - **Live scoring** — Team roles auto-assigned by efficiency, adapts from real usage data
+- **Usage tracking** — Per-provider token count with estimated cost
+- **Model catalog** — Browse and switch models by number or ID
 - **Interactive REPL** — Ink-powered terminal UI with cat theme
 
 ## Requirements
@@ -200,16 +202,49 @@ If you already use Claude Code or Codex, just run `paw` and it will offer to reu
 
 For other providers, enter your API key once and Cat's Claw saves it to `~/.cats-claw/credentials.json` (mode 0600) for next time.
 
+### Model Catalog
+
+Browse available models with `/model`:
+
+```
+* ollama:
+  1. qwen3 * — Qwen3 8B (balanced)
+  2. qwen2.5-coder:7b — Qwen2.5 Coder 7B (balanced)
+  3. qwen2.5-coder:14b — Qwen2.5 Coder 14B (powerful)
+  4. deepseek-r1:8b — DeepSeek R1 8B (balanced)
+
+  anthropic:
+  1. claude-haiku-4-5-20251001 — Haiku 4.5 (fast)
+  2. claude-sonnet-4-20250514 — Sonnet 4 (balanced)
+  3. claude-opus-4-20250514 — Opus 4 (powerful)
+
+  openai:
+  1. gpt-5-nano — GPT-5 Nano (fast)
+  2. gpt-5-mini — GPT-5 Mini (balanced)
+  3. gpt-5.2 — GPT-5.2 (powerful)
+  ...
+```
+
+Switch by number or ID:
+
+```
+/model ollama 3             # Switch to qwen2.5-coder:14b
+/model anthropic 1          # Switch to Haiku 4.5
+/model openai gpt-5.2       # Switch by ID
+```
+
 ## Modes
+
+Cat's Claw runs in a **single terminal** with two modes. Switch freely at any time.
 
 ### Solo Mode (default)
 
-Single provider handles all messages. Switch provider/model anytime with `/model`.
+Single provider handles all messages.
 
 ```
 /mode solo              # Activate (default)
 /model gemini           # Switch to Gemini
-/model openai gpt-5.2   # Switch to specific model
+/model openai 3         # Switch by number
 ```
 
 ### Team Mode
@@ -224,42 +259,84 @@ Single provider handles all messages. Switch provider/model anytime with `/model
 |------|-----|------|
 | Planner | Architecture & step-by-step plan | Sequential |
 | Coder | Implementation from plan | Sequential |
-| Reviewer | Code review, bugs, security | Parallel |
-| Tester | Test cases & edge cases | Parallel |
+| Reviewer | Code review, bugs, security | **Parallel** |
+| Tester | Test cases & edge cases | **Parallel** |
 | Optimizer | Performance & best practices | Sequential |
 
-**Review + Test run in parallel** for speed.
+### Team Configuration
+
+Three ways to configure the team:
+
+**1. Interactive Dashboard (`/team`):**
 
 ```
-/team implement a REST API with pagination   # One-shot team task
-/providers                                    # See team assignments
-/team                                         # Open team dashboard
+/team
+╭─ Team Dashboard ─────────────────────╮
+│ Mode: TEAM                           │
+│   planner   anthropic/claude-sonnet-4│
+│   coder     ollama/qwen3            │
+│   reviewer  anthropic/claude-sonnet-4│
+│   tester    openai/gpt-5-mini       │
+│   optimizer openai/gpt-5-mini       │
+│ Type: e(dit role) / t(oggle) / Enter │
+╰──────────────────────────────────────╯
+
+e → coder → gemini → gemini-2.5-pro
+~ coder → gemini/gemini-2.5-pro
 ```
 
-### Team Auto-Assignment
+**2. Direct command:**
 
-Roles are assigned by efficiency scores (0-10 per provider/role):
+```
+/model planner anthropic 3     # Planner → Opus 4
+/model coder gemini             # Coder → Gemini default
+/model reviewer openai gpt-5.2  # Reviewer → GPT-5.2
+```
+
+**3. Auto-assignment (default):**
+
+Roles are assigned by efficiency scores (0-10). Uses greedy unique-first strategy to spread across providers:
 
 ```
 planner  : anthropic/claude-sonnet-4    (score: 10)
-coder    : ollama/qwen3                 (score: 6, unique spread)
+coder    : ollama/qwen3                 (unique spread)
 reviewer : anthropic/claude-sonnet-4    (score: 9)
 tester   : openai/gpt-5-mini           (score: 9)
 optimizer: openai/gpt-5-mini            (score: 9)
 ```
 
-- Greedy unique-first: spreads across providers, then fills gaps
-- **Live scoring**: after 3+ uses, blends baseline with real speed/reliability
-- Scores stored in `~/.cats-claw/team-scores.json`
-- Edit any role: `/model reviewer gemini gemini-2.5-pro`
+After 3+ uses per role, scores blend with real speed/reliability data from `~/.cats-claw/team-scores.json`.
 
 ### Automatic Fallback
 
 When a provider fails (rate limit, quota, auth error):
 
-- **Solo**: auto-switches to next available provider
+- **Solo**: auto-switches to next available provider, shows `[Fallback: provider]`
 - **Team**: retries failed phase with a different provider
-- Ollama serves as the ultimate local fallback
+- Ollama serves as the ultimate local fallback (free, no rate limits)
+
+## Usage Tracking
+
+`/status` shows per-provider token usage and estimated cost:
+
+```
+Cat's Claw v1.0.0 | Mode: SOLO
+Active: anthropic/claude-sonnet-4
+
+Providers (3):
+  * anthropic — claude-sonnet-4
+    openai — gpt-5-mini
+    ollama — qwen3
+
+Usage:
+  anthropic/claude-sonnet-4
+    2.1k in / 1.8k out / 3 req  ~$0.0333
+  ollama/qwen3
+    500 in / 300 out / 1 req  (free)
+
+  Total: 2.6k in / 2.1k out
+  Estimated cost:  ~$0.0333
+```
 
 ## Tools (8 built-in)
 
@@ -302,6 +379,8 @@ paw mcp remove notion
   b + Enter             # Back to chat
 ```
 
+Failed connections show an error and are not saved.
+
 ### Config File
 
 Servers are stored in `.mcp.json` (project root):
@@ -325,28 +404,22 @@ Servers are stored in `.mcp.json` (project root):
 
 Supports stdio, HTTP, and SSE transports. MCP tools are automatically injected into all providers.
 
-## REPL Commands (18)
+## REPL Commands
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show all commands |
+| `/status` | Providers, usage, cost overview (aliases: /settings, /providers, /cost, /version) |
+| `/model [provider] [id\|number]` | List models / switch provider & model |
+| `/team [prompt]` | Team dashboard (no args) or run team task |
+| `/ask <provider> <prompt>` | One-shot query to specific provider |
 | `/tools` | Built-in + MCP tools |
 | `/mcp` | MCP server manager |
-| `/model [provider] [model]` | Show/switch provider & model |
-| `/mode solo\|team` | Switch mode |
-| `/team [prompt]` | Team dashboard or one-shot team task |
-| `/ask <provider> <prompt>` | Query specific provider |
-| `/providers` | List providers & team assignments |
-| `/settings` | Overview of all config |
-| `/cost` | Token usage |
-| `/git` | Git status |
-| `/diff` | Git diff |
-| `/log` | Recent commits |
+| `/git` | Git status + diff + recent log (aliases: /diff, /log) |
 | `/history` | Export chat to markdown |
 | `/compact` | Compress conversation context |
 | `/init` | Generate CONTEXT.md |
 | `/doctor` | Environment diagnostics |
-| `/version` | Show version |
 | `/clear` | Reset conversation |
 | `/exit` | Quit |
 
@@ -355,7 +428,7 @@ Supports stdio, HTTP, and SSE transports. MCP tools are automatically injected i
 | Key | Action |
 |-----|--------|
 | `Tab` | Autocomplete slash command |
-| `↑↓` | Navigate autocomplete / MCP select |
+| `↑↓` | Navigate autocomplete / selections |
 | `Ctrl+L` | Clear conversation |
 | `Ctrl+K` | Compact conversation |
 | `Esc` | Quit / go back |
@@ -365,31 +438,31 @@ Supports stdio, HTTP, and SSE transports. MCP tools are automatically injected i
 Type `/` and matching commands appear. Arrow keys to navigate, Tab to complete:
 
 ```
- > /help — show all commands
-   /history — export conversation
+ > /status — providers, usage, cost overview
+   /model  — list/switch models & providers
  Tab to complete | arrows to navigate
 ╭──────────────────────────────╮
-│  > /h                        │
+│  > /s                        │
 ╰──────────────────────────────╯
 ```
 
 ## Status Bar
 
-Always visible at the bottom:
+Always visible at the bottom of the REPL:
 
 ```
 Ollama/qwen3    turns: 5    mcp: 2 server(s)    local
 TEAM/qwen3      turns: 2    mcp: off             tokens: 12.3k
 ```
 
-Shows: provider/model, turn count, MCP status, token usage (or "local" for Ollama).
+Shows: mode/model, turn count, MCP status, token usage (or "local" for Ollama).
 
-## Credentials Storage
+## File Locations
 
 | File | Purpose |
 |------|---------|
 | `~/.cats-claw/credentials.json` | Saved API keys (mode 0600) |
-| `~/.cats-claw/team-scores.json` | Live performance scores |
+| `~/.cats-claw/team-scores.json` | Live team performance scores |
 | `~/.cats-claw/mcp.json` | Global MCP config (fallback) |
 | `.mcp.json` | Project-level MCP config |
 | `.env` | Environment variables |
@@ -449,25 +522,12 @@ You'll see:
   =^.^= Choose (1-6):
 ```
 
-If you have Claude Code or Codex installed, it auto-detects and offers to reuse the login:
+### 3. Example — Solo Mode
 
 ```
-  =^.^= Use Claude login (max plan)? [Y/n]:
-```
-
-### 3. Example Session — Solo Mode
-
-```
-=^.^= says:
-  Welcome! I'm ready to help with your code.
-
 you  explain the structure of this project
 =^.^= says:
-  This project has the following structure:
-  src/
-    index.ts    — entry point
-    agent.ts    — coding agent with multi-provider support
-    ...
+  This project has the following structure...
 
 you  /model gemini
 ~ Switched to Gemini/gemini-2.5-flash
@@ -476,14 +536,16 @@ you  find unnecessary dependencies in package.json
 =^.^= says:
   Looking at your dependencies...
 
-you  /cost
-~ Turns: 3
-  Input:  2.1k tokens
-  Output: 1.8k tokens
-  Total:  3.9k tokens
+you  /status
+~ Cat's Claw v1.0.0 | Mode: SOLO
+  Active: gemini/gemini-2.5-flash
+  ...
+  Usage:
+    gemini/gemini-2.5-flash
+      1.2k in / 900 out / 2 req  ~$0.0007
 ```
 
-### 4. Example Session — Team Mode
+### 4. Example — Team Mode
 
 ```
 you  /mode team
@@ -505,7 +567,6 @@ you  implement a JWT authentication system
 --- PLANNER (anthropic/claude-sonnet-4, 3200ms) ---
 1. Create src/auth.ts — JWT issue/verify
 2. Create src/middleware.ts — auth middleware
-3. Add JWT_SECRET to .env
 ...
 
 --- CODER (ollama/qwen3, 8100ms) ---
@@ -538,17 +599,6 @@ paw mcp add --transport stdio memory -- npx -y @modelcontextprotocol/server-memo
 paw mcp list
 ```
 
-In the REPL:
-
-```
-you  /mcp
-╭─ MCP Server Manager ─────────────────╮
-│  + github — npx — 12 tool(s)        │
-│  + memory — npx — 9 tool(s)         │
-│ Type: a(dd) / r(emove) / b(ack)      │
-╰──────────────────────────────────────╯
-```
-
 ### 6. Example — Cross-Provider Query
 
 ```
@@ -561,26 +611,7 @@ you  /ask openai any security vulnerabilities?
   [openai] SQL injection risk at line 42...
 ```
 
-### 7. Example — Team Dashboard
-
-```
-you  /team
-╭─ Team Dashboard ─────────────────────╮
-│ Mode: TEAM                           │
-│   planner   anthropic/claude-sonnet-4│
-│   coder     ollama/qwen3            │
-│   reviewer  anthropic/claude-sonnet-4│
-│   tester    openai/gpt-5-mini       │
-│   optimizer openai/gpt-5-mini       │
-│ Type: e(dit role) / t(oggle) / Enter │
-╰──────────────────────────────────────╯
-
-# Edit a role:
-e → coder → gemini → gemini-2.5-pro
-~ coder → gemini/gemini-2.5-pro
-```
-
-### 8. Example — Fallback in Action
+### 7. Example — Fallback in Action
 
 ```
 you  refactor this complex module
