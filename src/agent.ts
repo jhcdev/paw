@@ -42,6 +42,22 @@ export class CodingAgent {
     this.team.configure(teamConfig);
   }
 
+  /** Restore conversation history from a session into the provider */
+  restoreHistory(entries: { role: "user" | "assistant" | "system"; text: string }[]): void {
+    for (const entry of entries) {
+      if (entry.role === "user") {
+        // Inject as a fake turn so the provider has context
+        if ("messages" in this.provider && Array.isArray((this.provider as any).messages)) {
+          (this.provider as any).messages.push({ role: "user", content: entry.text });
+        }
+      } else if (entry.role === "assistant") {
+        if ("messages" in this.provider && Array.isArray((this.provider as any).messages)) {
+          (this.provider as any).messages.push({ role: "assistant", content: [{ type: "text", text: entry.text }] });
+        }
+      }
+    }
+  }
+
   async initMcp(cwd: string): Promise<void> {
     await this.mcpManager.loadAndConnect(cwd);
     this.mcpReady = true;

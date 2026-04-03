@@ -8,6 +8,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { Box, Newline, render, Text, useApp, useInput, useStdin } from "ink";
 
 import type { CodingAgent } from "./agent.js";
+import { appendToSession, saveSession, listSessions, watchSession, type SessionData, type SessionEntry } from "./session.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
 import { formatModelList, getAllFilteredModels, resolveModelByIndex, detectPlan } from "./model-catalog.js";
@@ -18,6 +19,8 @@ type StartReplOptions = {
   provider: ProviderName;
   model: string;
   cwd: string;
+  sessionId: string;
+  existingSession?: SessionData | null;
 };
 
 type ChatEntry = {
@@ -72,15 +75,21 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/compact", desc: "compress conversation" },
   { name: "/init", desc: "generate project context" },
   { name: "/doctor", desc: "diagnostics" },
+  { name: "/sessions", desc: "list past sessions" },
+  { name: "/session", desc: "current session ID" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
 ];
 
 function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions }) {
   const { exit } = useApp();
-  const [entries, setEntries] = useState<ChatEntry[]>([
-    { role: "system", text: "Meow~ Ready to code! Try /help, /tools, /clear, or /exit." },
-  ]);
+  const [sessionId] = useState(options.sessionId);
+  const [entries, setEntries] = useState<ChatEntry[]>(() => {
+    if (options.existingSession?.entries.length) {
+      return options.existingSession.entries.map((e) => ({ role: e.role, text: e.text }));
+    }
+    return [{ role: "system", text: "Meow~ Ready to code! Try /help, /tools, /clear, or /exit." }];
+  });
   const [input, setInput] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
@@ -125,6 +134,30 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     stdin.on("data", handler);
     return () => { stdin.off("data", handler); };
   }, [stdin]);
+
+  // Watch session file for changes from other terminals
+  React.useEffect(() => {
+    const unwatch = watchSession(sessionId, (data) => {
+      setEntries(data.entries.map((e) => ({ role: e.role, text: e.text })));
+    });
+    return unwatch;
+  }, [sessionId]);
+
+  // Save session on every entries change
+  React.useEffect(() => {
+    if (entries.length <= 1) return;
+    const data: SessionData = {
+      id: sessionId,
+      provider: agent.getActiveProvider(),
+      model: agent.getActiveModel(),
+      mode,
+      cwd: options.cwd,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      entries: entries.map((e) => ({ role: e.role, text: e.text, timestamp: new Date().toISOString() })),
+    };
+    saveSession(data).catch(() => {});
+  }, [entries, sessionId]);
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
@@ -700,6 +733,23 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       // ── settings panel ──
       if (line === "/settings") {
         setSettingsPanel("list");
+        return;
+      }
+
+      // ── sessions ──
+      if (line === "/sessions") {
+        const sessions = await listSessions(10);
+        if (sessions.length === 0) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No saved sessions." }]);
+        } else {
+          const list = sessions.map((s) => `  ${s.id === sessionId ? "* " : "  "}${s.id}  ${s.provider}/${s.model}  ${s.turns} turns  ${s.preview}`).join("\n");
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Sessions:\n${list}\n\nResume: paw --session <id>` }]);
+        }
+        return;
+      }
+
+      if (line === "/session") {
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Current session: ${sessionId}` }]);
         return;
       }
 

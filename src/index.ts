@@ -6,6 +6,7 @@ import { startRepl } from "./cli.js";
 import { mcpCli } from "./mcp-cli.js";
 import { getAllFilteredModels } from "./model-catalog.js";
 import { detectProviders } from "./multi-provider.js";
+import { createSessionId, getLastSessionId, listSessions, loadSession, saveSession, type SessionData } from "./session.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
 
@@ -19,6 +20,8 @@ type ParsedArgs = {
   doLogout: boolean;
   logoutProvider?: ProviderName;
   doList: boolean;
+  doContinue: boolean;
+  sessionId?: string;
 };
 
 const VALID_PROVIDERS = new Set<string>(["anthropic", "codex", "ollama"]);
@@ -36,7 +39,9 @@ function printHelp(): void {
   process.stdout.write(`  --provider <name>   anthropic, codex, ollama\n`);
   process.stdout.write(`  --model <id>        Override model for the session\n`);
   process.stdout.write(`  --list              Show saved credentials\n`);
-  process.stdout.write(`  --logout [provider] Remove saved credentials\n\n`);
+  process.stdout.write(`  --logout [provider] Remove saved credentials\n`);
+  process.stdout.write(`  --continue, -c      Resume last session\n`);
+  process.stdout.write(`  --session <id>      Join specific session\n\n`);
   process.stdout.write(`MCP Commands:\n`);
   process.stdout.write(`  mcp list                              List MCP servers\n`);
   process.stdout.write(`  mcp add --transport http <name> <url>  Add HTTP/SSE server\n`);
@@ -56,6 +61,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   let doLogout = false;
   let logoutProvider: ProviderName | undefined;
   let doList = false;
+  let doContinue = false;
+  let sessionId: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -63,6 +70,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     if (arg === "--help") { showHelp = true; continue; }
     if (arg === "--tools") { showTools = true; continue; }
     if (arg === "--list") { doList = true; continue; }
+    if (arg === "--continue" || arg === "-c") { doContinue = true; continue; }
+    if (arg === "--session") { sessionId = argv[++i]; continue; }
     if (arg === "--logout") {
       doLogout = true;
       const next = argv[i + 1];
@@ -79,11 +88,12 @@ function parseArgs(argv: string[]): ParsedArgs {
     promptParts.push(arg);
   }
 
-  const parsed: ParsedArgs = { cwd, showHelp, showTools, doLogout, doList };
+  const parsed: ParsedArgs = { cwd, showHelp, showTools, doLogout, doList, doContinue };
   if (provider) parsed.provider = provider;
   if (model) parsed.model = model;
   if (logoutProvider) parsed.logoutProvider = logoutProvider;
   if (promptParts.length > 0) parsed.prompt = promptParts.join(" ");
+  if (sessionId) parsed.sessionId = sessionId;
   return parsed;
 }
 
@@ -156,6 +166,17 @@ async function main(): Promise<void> {
 
   await Promise.all([agent.initMcp(args.cwd), agent.initTeam()]);
 
+  // Restore session for --continue in one-shot mode
+  if (args.doContinue || args.sessionId) {
+    const sid = args.sessionId ?? await getLastSessionId();
+    if (sid) {
+      const session = await loadSession(sid);
+      if (session?.entries.length) {
+        agent.restoreHistory(session.entries);
+      }
+    }
+  }
+
   if (args.prompt) {
     // Handle slash commands in one-shot mode
     if (["/status", "/settings", "/providers", "/cost", "/version"].includes(args.prompt)) {
@@ -216,6 +237,11 @@ async function main(): Promise<void> {
       process.stdout.write(`MCP: ${agent.getMcpStatus().length} server(s)\n`);
       await agent.shutdown(); return;
     }
+    if (args.prompt === "/sessions") {
+      const sessions = await listSessions(10);
+      for (const s of sessions) process.stdout.write(`  ${s.id}  ${s.provider}/${s.model}  ${s.turns} turns  ${s.preview}\n`);
+      await agent.shutdown(); return;
+    }
     if (args.prompt.startsWith("/team ")) {
       const teamPrompt = args.prompt.slice(6).trim();
       if (!agent.getTeam().isReady()) {
@@ -243,12 +269,43 @@ async function main(): Promise<void> {
     } else {
       const result = await agent.runTurn(args.prompt);
       process.stdout.write(`${result.text}\n`);
+      const promptSessionId = createSessionId();
+      await saveSession({
+        id: promptSessionId, provider: agent.getActiveProvider(), model: agent.getActiveModel(),
+        mode: "solo", cwd: args.cwd, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        entries: [
+          { role: "user", text: args.prompt, timestamp: new Date().toISOString() },
+          { role: "assistant", text: result.text, timestamp: new Date().toISOString() },
+        ],
+      });
     }
     await agent.shutdown();
     return;
   }
 
-  await startRepl(agent, { provider: auth.provider, model: auth.model, cwd: args.cwd });
+  // Determine session
+  let sessionId: string;
+  let existingSession: SessionData | null = null;
+  if (args.sessionId) {
+    sessionId = args.sessionId;
+    existingSession = await loadSession(sessionId);
+  } else if (args.doContinue) {
+    const lastId = await getLastSessionId();
+    if (lastId) { sessionId = lastId; existingSession = await loadSession(lastId); }
+    else { sessionId = createSessionId(); }
+  } else {
+    sessionId = createSessionId();
+  }
+
+  process.stdout.write(`${pc.gray(`Session: ${sessionId}`)}\n`);
+
+  // Restore conversation history if resuming
+  if (existingSession?.entries.length) {
+    agent.restoreHistory(existingSession.entries);
+    process.stdout.write(`${pc.gray(`Restored ${existingSession.entries.filter(e => e.role === "user").length} turns`)}\n`);
+  }
+
+  await startRepl(agent, { provider: auth.provider, model: auth.model, cwd: args.cwd, sessionId, existingSession });
   await agent.shutdown();
 }
 
