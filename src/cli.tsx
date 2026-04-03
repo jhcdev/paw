@@ -1134,6 +1134,7 @@ function openTtyStdin(): tty.ReadStream | undefined {
   try {
     const fd = fs.openSync("/dev/tty", "r");
     const stream = new tty.ReadStream(fd);
+    stream.setEncoding("utf8");
     return stream;
   } catch {
     return undefined;

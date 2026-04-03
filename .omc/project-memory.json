@@ -137,6 +137,12 @@
       "accessCount": 2,
       "lastAccessed": 1775223090129,
       "type": "file"
+    },
+    {
+      "path": "src/cli.tsx",
+      "accessCount": 2,
+      "lastAccessed": 1775223231196,
+      "type": "directory"
     }
   ],
   "userDirectives": []
