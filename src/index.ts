@@ -3,6 +3,7 @@ import pc from "picocolors";
 import { CodingAgent } from "./agent.js";
 import { interactiveLogin, listSavedProviders, logout } from "./auth.js";
 import { startRepl } from "./cli.js";
+import { mcpCli } from "./mcp-cli.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
 
@@ -33,7 +34,14 @@ function printHelp(): void {
   process.stdout.write(`  --provider <name>   anthropic, openai, gemini, groq, openrouter, ollama\n`);
   process.stdout.write(`  --model <id>        Override model for the session\n`);
   process.stdout.write(`  --list              Show saved credentials\n`);
-  process.stdout.write(`  --logout [provider] Remove saved credentials\n`);
+  process.stdout.write(`  --logout [provider] Remove saved credentials\n\n`);
+  process.stdout.write(`MCP Commands:\n`);
+  process.stdout.write(`  mcp list                              List MCP servers\n`);
+  process.stdout.write(`  mcp add --transport http <name> <url>  Add HTTP/SSE server\n`);
+  process.stdout.write(`  mcp add <name> -- <cmd> [args...]      Add stdio server\n`);
+  process.stdout.write(`  mcp add-json <name> '<json>'           Add from JSON\n`);
+  process.stdout.write(`  mcp remove <name>                      Remove server\n`);
+  process.stdout.write(`  mcp get <name>                         Show server config\n`);
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -78,7 +86,17 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  // Handle "mcp" subcommand before anything else
+  const rawArgs = process.argv.slice(2);
+  if (rawArgs[0] === "mcp") {
+    const cwd = rawArgs.includes("--cwd")
+      ? path.resolve(rawArgs[rawArgs.indexOf("--cwd") + 1] ?? process.cwd())
+      : process.cwd();
+    await mcpCli(rawArgs.slice(1), cwd);
+    return;
+  }
+
+  const args = parseArgs(rawArgs);
 
   if (args.showHelp) { printHelp(); return; }
   if (args.showTools) {

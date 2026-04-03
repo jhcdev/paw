@@ -3,16 +3,19 @@ import path from "node:path";
 import os from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-// SSE transport import is conditional below
+// HTTP/SSE transports are dynamically imported in connectServer
+type StreamableHTTPClientTransport = import("@modelcontextprotocol/sdk/client/streamableHttp.js").StreamableHTTPClientTransport;
+type SSEClientTransport = import("@modelcontextprotocol/sdk/client/sse.js").SSEClientTransport;
 import pc from "picocolors";
 import type { ToolDefinition, ToolHandler, ToolResult } from "./types.js";
 
 type McpServerConfig = {
-  type?: "stdio" | "sse";
+  type?: "stdio" | "http" | "sse";
   command?: string;
   args?: string[];
   env?: Record<string, string>;
   url?: string;
+  headers?: Record<string, string>;
 };
 
 type McpConfigFile = {
@@ -22,7 +25,7 @@ type McpConfigFile = {
 type ConnectedServer = {
   name: string;
   client: Client;
-  transport: StdioClientTransport;
+  transport: unknown;
   tools: ToolDefinition[];
 };
 
@@ -155,25 +158,29 @@ export class McpManager {
   }
 
   private async connectServer(name: string, config: McpServerConfig, cwd: string): Promise<void> {
-    if (config.type === "sse" || config.url) {
-      // SSE servers are not yet supported in this implementation
-      process.stdout.write(`${pc.yellow("  skip")} ${name} (SSE not yet supported)\n`);
-      return;
-    }
+    let transport: StdioClientTransport | StreamableHTTPClientTransport | SSEClientTransport;
 
-    if (!config.command) {
-      throw new Error(`${name}: missing "command" in config`);
+    if (config.type === "http" || (config.url && config.type !== "sse" && config.type !== "stdio")) {
+      if (!config.url) throw new Error(`${name}: missing "url" for http transport`);
+      const { StreamableHTTPClientTransport: HttpTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+      const headers: Record<string, string> = { ...(config.headers ?? {}) };
+      transport = new HttpTransport(new URL(config.url), { requestInit: { headers } }) as unknown as StreamableHTTPClientTransport;
+    } else if (config.type === "sse") {
+      if (!config.url) throw new Error(`${name}: missing "url" for sse transport`);
+      const { SSEClientTransport: SseTransport } = await import("@modelcontextprotocol/sdk/client/sse.js");
+      transport = new SseTransport(new URL(config.url)) as unknown as SSEClientTransport;
+    } else {
+      if (!config.command) throw new Error(`${name}: missing "command" for stdio transport`);
+      transport = new StdioClientTransport({
+        command: config.command,
+        args: config.args ?? [],
+        env: {
+          ...process.env as Record<string, string>,
+          ...(config.env ?? {}),
+        },
+        cwd,
+      });
     }
-
-    const transport = new StdioClientTransport({
-      command: config.command,
-      args: config.args ?? [],
-      env: {
-        ...process.env as Record<string, string>,
-        ...(config.env ?? {}),
-      },
-      cwd,
-    });
 
     const client = new Client({
       name: "cats-claw",
