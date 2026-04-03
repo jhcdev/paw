@@ -778,6 +778,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
           {settingsPanel === "list" ? (
             <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Registered providers:</Text>
               {agent.getMulti().getRegistered().map((p, i) => (
                 <Box key={p.name}>
                   <Text color={p.name === agent.getActiveProvider() ? "#ff9c73" : "#ffb088"} bold>
@@ -789,22 +790,25 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                   <Text color="green">{p.name === agent.getActiveProvider() ? " (active)" : ""}</Text>
                 </Box>
               ))}
-              <Box marginTop={1}>
-                <Text color="#cc8866">Number to edit | <Text bold>a</Text>(dd provider) | Enter(back)</Text>
+              <Box marginTop={1} flexDirection="column">
+                <Text color="#cc8866">Type number + Enter to edit key</Text>
+                <Text color="#cc8866">Type <Text bold>a</Text> + Enter to add new provider</Text>
+                <Text color="#cc8866">Press Enter or Esc to go back</Text>
               </Box>
             </Box>
           ) : null}
 
           {settingsPanel === "add-key" && !settingsProvider ? (
             <Box flexDirection="column" marginTop={1}>
-              <Text color="#cc8866">Provider name (anthropic/openai/gemini/groq/openrouter):</Text>
+              <Text color="#cc8866">Type provider name + Enter:</Text>
+              <Text color="gray">  anthropic / openai / gemini / groq / openrouter</Text>
             </Box>
           ) : null}
 
           {settingsPanel === "add-key" && settingsProvider ? (
             <Box flexDirection="column" marginTop={1}>
               <Text color="gray">Provider: <Text bold color="#ffb088">{settingsProvider}</Text></Text>
-              <Text color="#cc8866">Enter API key (Enter to cancel):</Text>
+              <Text color="#cc8866">Paste API key + Enter (empty to cancel):</Text>
             </Box>
           ) : null}
         </Box>
