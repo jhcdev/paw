@@ -125,7 +125,7 @@ async function main(): Promise<void> {
       const priority: ProviderName[] = ["anthropic", "openai", "gemini", "groq", "openrouter", "ollama"];
       const best = priority.find((p) => detected.some((d) => d.provider === p));
       const chosen = detected.find((d) => d.provider === best) ?? detected[0]!;
-      auth = { provider: chosen.provider, apiKey: chosen.apiKey, model: args.model ?? chosen.model, baseUrl: chosen.baseUrl };
+      auth = { provider: chosen.provider, apiKey: chosen.apiKey, model: chosen.model, baseUrl: chosen.baseUrl };
       process.stdout.write(`${pc.gray(`=^.^= Auto-detected: ${auth.provider}/${auth.model}`)}\n`);
     } else {
       // Nothing detected — ask user to pick
