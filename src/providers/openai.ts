@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
 import { toolDefinitions, toolHandlers } from "../tools.js";
-import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler } from "../types.js";
+import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler, TokenUsage } from "../types.js";
 
 const SYSTEM_PROMPT = `You are Cat's Claw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
 
@@ -45,6 +45,7 @@ export class OpenAIProvider implements LlmProvider {
     this.messages.push({ role: "user", content: prompt });
     let assistantText = "";
     const allHandlers = { ...toolHandlers, ...this.extraHandlers };
+    const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
     for (let i = 0; i < 10; i++) {
       const response = await this.client.chat.completions.create({
@@ -54,8 +55,11 @@ export class OpenAIProvider implements LlmProvider {
         max_tokens: 4096,
       });
 
+      totalUsage.inputTokens += response.usage?.prompt_tokens ?? 0;
+      totalUsage.outputTokens += response.usage?.completion_tokens ?? 0;
+
       const choice = response.choices[0];
-      if (!choice) return { text: assistantText || "(empty response)" };
+      if (!choice) return { text: assistantText || "(empty response)", usage: totalUsage };
 
       const message = choice.message;
       this.messages.push(message);
@@ -65,7 +69,7 @@ export class OpenAIProvider implements LlmProvider {
       }
 
       const toolCalls = message.tool_calls;
-      if (!toolCalls || toolCalls.length === 0) return { text: assistantText };
+      if (!toolCalls || toolCalls.length === 0) return { text: assistantText, usage: totalUsage };
 
       for (const toolCall of toolCalls) {
         const handler = allHandlers[toolCall.function.name];
@@ -83,6 +87,6 @@ export class OpenAIProvider implements LlmProvider {
       }
     }
 
-    return { text: assistantText || "Stopped after reaching the tool iteration limit." };
+    return { text: assistantText || "Stopped after reaching the tool iteration limit.", usage: totalUsage };
   }
 }

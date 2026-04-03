@@ -1,6 +1,6 @@
 import { GoogleGenAI, FunctionCallingConfigMode } from "@google/genai";
 import { toolDefinitions, toolHandlers } from "../tools.js";
-import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler } from "../types.js";
+import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler, TokenUsage } from "../types.js";
 
 const SYSTEM_PROMPT = `You are Cat's Claw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
 
@@ -41,6 +41,7 @@ export class GeminiProvider implements LlmProvider {
     let assistantText = "";
     const allTools = [...toolDefinitions, ...this.extraTools];
     const allHandlers = { ...toolHandlers, ...this.extraHandlers };
+    const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
     for (let i = 0; i < 10; i++) {
       const response = await this.client.models.generateContent({
@@ -63,6 +64,9 @@ export class GeminiProvider implements LlmProvider {
         },
       });
 
+      totalUsage.inputTokens += response.usageMetadata?.promptTokenCount ?? 0;
+      totalUsage.outputTokens += response.usageMetadata?.candidatesTokenCount ?? 0;
+
       const candidate = response.candidates?.[0];
       const parts = (candidate?.content?.parts ?? []) as Array<Record<string, unknown>>;
       this.contents.push({ role: "model", parts });
@@ -76,7 +80,7 @@ export class GeminiProvider implements LlmProvider {
         .map((p) => p.functionCall)
         .filter((c): c is { id?: string; name?: string; args?: unknown } => typeof c === "object" && c !== null);
 
-      if (functionCalls.length === 0) return { text: assistantText || response.text || "" };
+      if (functionCalls.length === 0) return { text: assistantText || response.text || "", usage: totalUsage };
 
       const functionResponses: Array<Record<string, unknown>> = [];
       for (const fc of functionCalls) {
@@ -100,6 +104,6 @@ export class GeminiProvider implements LlmProvider {
       this.contents.push({ role: "user", parts: functionResponses });
     }
 
-    return { text: assistantText || "Stopped after reaching the tool iteration limit." };
+    return { text: assistantText || "Stopped after reaching the tool iteration limit.", usage: totalUsage };
   }
 }

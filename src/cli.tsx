@@ -1,5 +1,9 @@
+import { exec } from "node:child_process";
+import { promises as fsPromises } from "node:fs";
 import fs from "node:fs";
+import path from "node:path";
 import tty from "node:tty";
+import { promisify } from "node:util";
 import React, { useCallback, useMemo, useState } from "react";
 import { Box, Newline, render, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
@@ -7,6 +11,8 @@ import TextInput from "ink-text-input";
 import type { CodingAgent } from "./agent.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
+
+const execAsync = promisify(exec);
 
 type StartReplOptions = {
   provider: ProviderName;
@@ -43,6 +49,12 @@ function randomCatMood(): string {
   return CAT_MOODS[Math.floor(Math.random() * CAT_MOODS.length)]!;
 }
 
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
 function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions }) {
   const { exit } = useApp();
   const [entries, setEntries] = useState<ChatEntry[]>([
@@ -51,6 +63,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [input, setInput] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
+  const [turnCount, setTurnCount] = useState(0);
 
   useInput((ch, key) => {
     if (key.escape && !isBusy) exit();
@@ -62,10 +75,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       "  ~( Tips )~",
       "",
       "  Type naturally to chat.",
-      "  /tools  - available tools",
-      "  /mcp    - MCP servers",
-      "  /clear  - fresh start",
-      "  /exit   - bye bye~",
+      "  /help   - all commands",
       "",
       "  Esc to quit anytime.",
     ],
@@ -78,29 +88,47 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (!line || isBusy) return;
       setInput("");
 
-      if (line === "/exit") { exit(); return; }
+      // ── exit ──
+      if (line === "/exit" || line === "/quit") { exit(); return; }
 
+      // ── clear ──
       if (line === "/clear") {
         agent.clear();
-        setEntries([{ role: "system", text: "Purrr~ Conversation cleared! Fresh start, nya~" }]);
+        setTurnCount(0);
+        setEntries([{ role: "system", text: "Conversation cleared." }]);
         return;
       }
 
+      // ── help ──
       if (line === "/help") {
         setEntries((c) => [...c,
           { role: "user", text: line },
-          { role: "system", text: "  /help   - this menu\n  /tools  - available tools\n  /mcp    - MCP server status\n  /clear  - reset chat\n  /exit   - quit" },
+          { role: "system", text: [
+            "Commands:",
+            "  /help      - this menu",
+            "  /tools     - available tools",
+            "  /mcp       - MCP server status",
+            "  /model     - current model info",
+            "  /cost      - token usage",
+            "  /git       - git status",
+            "  /diff      - git diff",
+            "  /log       - recent git commits",
+            "  /history   - export conversation",
+            "  /compact   - compress conversation",
+            "  /clear     - reset chat",
+            "  /exit      - quit",
+          ].join("\n") },
         ]);
         return;
       }
 
+      // ── mcp ──
       if (line === "/mcp") {
         const servers = agent.getMcpStatus();
         if (servers.length === 0) {
-          const mcpTools = agent.getMcpTools();
           setEntries((c) => [...c,
             { role: "user", text: line },
-            { role: "system", text: "No MCP servers connected.\n\nTo add MCP servers, create .mcp.json in the project root:\n\n  {\n    \"mcpServers\": {\n      \"name\": {\n        \"command\": \"npx\",\n        \"args\": [\"-y\", \"@modelcontextprotocol/server-xxx\"]\n      }\n    }\n  }\n\nThen restart Cat's Claw." },
+            { role: "system", text: "No MCP servers connected.\n\nCreate .mcp.json in the project root:\n\n  {\n    \"mcpServers\": {\n      \"name\": {\n        \"command\": \"npx\",\n        \"args\": [\"-y\", \"@modelcontextprotocol/server-xxx\"]\n      }\n    }\n  }\n\nThen restart." },
           ]);
         } else {
           const mcpTools = agent.getMcpTools();
@@ -116,21 +144,143 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+      // ── tools ──
       if (line === "/tools") {
-        const toolList = toolDefinitions.map((t) => `  ${t.name} - ${t.description}`).join("\n");
+        const builtIn = toolDefinitions.map((t) => `  ${t.name} - ${t.description}`).join("\n");
+        const mcpTools = agent.getMcpTools();
+        const mcpSection = mcpTools.length > 0
+          ? "\n\nMCP Tools:\n" + mcpTools.map((t) => `  ${t.name} - ${t.description}`).join("\n")
+          : "";
         setEntries((c) => [...c,
           { role: "user", text: line },
-          { role: "system", text: `Tools:\n${toolList}` },
+          { role: "system", text: `Built-in Tools:\n${builtIn}${mcpSection}` },
         ]);
         return;
       }
 
+      // ── model ──
+      if (line === "/model") {
+        setEntries((c) => [...c,
+          { role: "user", text: line },
+          { role: "system", text: `Provider: ${PROVIDER_LABELS[options.provider] ?? options.provider}\nModel:    ${options.model}\nCWD:      ${options.cwd}` },
+        ]);
+        return;
+      }
+
+      // ── cost ──
+      if (line === "/cost") {
+        const usage = agent.getUsage();
+        if (options.provider === "ollama") {
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: `Turns: ${turnCount}\nLocal model — token tracking not applicable.` },
+          ]);
+        } else {
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: `Turns: ${turnCount}\nInput:  ${formatTokens(usage.inputTokens)} tokens\nOutput: ${formatTokens(usage.outputTokens)} tokens\nTotal:  ${formatTokens(usage.inputTokens + usage.outputTokens)} tokens` },
+          ]);
+        }
+        return;
+      }
+
+      // ── git ──
+      if (line === "/git") {
+        try {
+          const { stdout } = await execAsync("git status --short", { cwd: options.cwd });
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: stdout.trim() || "(working tree clean)" },
+          ]);
+        } catch {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Not a git repository." }]);
+        }
+        return;
+      }
+
+      // ── diff ──
+      if (line === "/diff") {
+        try {
+          const { stdout } = await execAsync("git diff --stat", { cwd: options.cwd });
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: stdout.trim() || "(no changes)" },
+          ]);
+        } catch {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Not a git repository." }]);
+        }
+        return;
+      }
+
+      // ── log ──
+      if (line === "/log") {
+        try {
+          const { stdout } = await execAsync("git log --oneline -10", { cwd: options.cwd });
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: stdout.trim() || "(no commits)" },
+          ]);
+        } catch {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Not a git repository." }]);
+        }
+        return;
+      }
+
+      // ── history ──
+      if (line === "/history") {
+        const exportPath = path.join(options.cwd, `chat-${Date.now()}.md`);
+        const content = entries.map((e) => {
+          if (e.role === "user") return `**You:** ${e.text}`;
+          if (e.role === "assistant") return `**Assistant:** ${e.text}`;
+          return `*${e.text}*`;
+        }).join("\n\n");
+        try {
+          await fsPromises.writeFile(exportPath, content, "utf8");
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: `Exported to ${path.basename(exportPath)}` },
+          ]);
+        } catch (err) {
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: `Export failed: ${err instanceof Error ? err.message : String(err)}` },
+          ]);
+        }
+        return;
+      }
+
+      // ── compact ──
+      if (line === "/compact") {
+        agent.clear();
+        const summary = entries
+          .filter((e) => e.role === "assistant")
+          .slice(-3)
+          .map((e) => e.text.slice(0, 200))
+          .join("\n---\n");
+        setEntries([
+          { role: "system", text: "Conversation compacted. Recent context preserved." },
+          ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
+        ]);
+        return;
+      }
+
+      // ── unknown command ──
+      if (line.startsWith("/")) {
+        setEntries((c) => [...c,
+          { role: "user", text: line },
+          { role: "system", text: `Unknown command: ${line}\nType /help for available commands.` },
+        ]);
+        return;
+      }
+
+      // ── normal message ──
       setEntries((c) => [...c, { role: "user", text: line }]);
       setIsBusy(true);
       setThinkMsg(randomCatMood());
 
       try {
         const result = await agent.runTurn(line);
+        setTurnCount((c) => c + 1);
         setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
       } catch (error) {
         setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
@@ -138,7 +288,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy],
+    [agent, exit, isBusy, entries, turnCount, options],
   );
 
   const providerLabel = PROVIDER_LABELS[options.provider] ?? options.provider;

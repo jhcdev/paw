@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam, ToolResultBlockParam } from "@anthropic-ai/sdk/resources/messages";
 import { toolDefinitions, toolHandlers } from "../tools.js";
-import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler } from "../types.js";
+import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler, TokenUsage } from "../types.js";
 
 const SYSTEM_PROMPT = `You are Cat's Claw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
 
@@ -33,6 +33,7 @@ export class AnthropicProvider implements LlmProvider {
     let assistantText = "";
     const allTools = [...toolDefinitions, ...this.extraTools];
     const allHandlers = { ...toolHandlers, ...this.extraHandlers };
+    const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
     for (let i = 0; i < 10; i++) {
       const response = await this.client.messages.create({
@@ -43,6 +44,9 @@ export class AnthropicProvider implements LlmProvider {
         tools: allTools,
       });
 
+      totalUsage.inputTokens += response.usage.input_tokens;
+      totalUsage.outputTokens += response.usage.output_tokens;
+
       this.messages.push({ role: "assistant", content: response.content });
 
       const textBlocks = response.content.filter((b) => b.type === "text");
@@ -51,7 +55,7 @@ export class AnthropicProvider implements LlmProvider {
       }
 
       const toolUses = response.content.filter((b) => b.type === "tool_use");
-      if (toolUses.length === 0) return { text: assistantText };
+      if (toolUses.length === 0) return { text: assistantText, usage: totalUsage };
 
       const toolResults: ToolResultBlockParam[] = [];
       for (const toolUse of toolUses) {
@@ -73,6 +77,6 @@ export class AnthropicProvider implements LlmProvider {
       this.messages.push({ role: "user", content: toolResults });
     }
 
-    return { text: assistantText || "Stopped after reaching the tool iteration limit." };
+    return { text: assistantText || "Stopped after reaching the tool iteration limit.", usage: totalUsage };
   }
 }

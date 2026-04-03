@@ -95,6 +95,54 @@ async function runShell(input: Record<string, unknown>, cwd: string): Promise<To
   return { content: content || "(command produced no output)" };
 }
 
+async function globFiles(input: Record<string, unknown>, cwd: string): Promise<ToolResult> {
+  if (typeof input.pattern !== "string") throw new Error("pattern is required");
+  const target = typeof input.path === "string" ? input.path : ".";
+  const fullPath = resolveWithinCwd(cwd, target);
+  const results: string[] = [];
+
+  async function walk(dir: string, pattern: RegExp): Promise<void> {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === ".git" || entry.name === "dist") continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(full, pattern);
+      } else if (pattern.test(entry.name)) {
+        results.push(path.relative(fullPath, full));
+      }
+    }
+  }
+
+  // Convert simple glob to regex: *.ts -> /\.ts$/, **/*.tsx -> /\.tsx$/
+  const globPart = input.pattern.replace(/\*\*\//g, "").replace(/\*/g, ".*");
+  const regex = new RegExp(globPart.replace(/\./g, "\\.").replace(/\.\*/g, ".*"));
+  await walk(fullPath, regex);
+  results.sort();
+  const limited = results.slice(0, 200);
+  const suffix = results.length > 200 ? `\n...(${results.length - 200} more)` : "";
+  return { content: limited.length > 0 ? limited.join("\n") + suffix : "(no matches)" };
+}
+
+async function webFetch(input: Record<string, unknown>, _cwd: string): Promise<ToolResult> {
+  if (typeof input.url !== "string") throw new Error("url is required");
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const response = await fetch(input.url, {
+      signal: controller.signal,
+      headers: { "User-Agent": "CatsClaw/1.0" },
+    });
+    clearTimeout(timeout);
+    if (!response.ok) return { content: `HTTP ${response.status}: ${response.statusText}`, isError: true };
+    const text = await response.text();
+    // Truncate large responses
+    return { content: text.length > 50000 ? text.slice(0, 50000) + "\n...(truncated)" : text };
+  } catch (error) {
+    return { content: error instanceof Error ? error.message : String(error), isError: true };
+  }
+}
+
 export const toolDefinitions: ToolDefinition[] = [
   {
     name: "list_files",
@@ -166,6 +214,29 @@ export const toolDefinitions: ToolDefinition[] = [
       required: ["command"],
     },
   },
+  {
+    name: "glob",
+    description: "Find files matching a pattern in the workspace (e.g. *.ts, **/*.tsx).",
+    input_schema: {
+      type: "object",
+      properties: {
+        pattern: { type: "string", description: "Glob-like pattern to match file names." },
+        path: { type: "string", description: "Optional relative path to search in." },
+      },
+      required: ["pattern"],
+    },
+  },
+  {
+    name: "web_fetch",
+    description: "Fetch content from a URL.",
+    input_schema: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "URL to fetch." },
+      },
+      required: ["url"],
+    },
+  },
 ];
 
 export const toolHandlers: Record<string, ToolHandler> = {
@@ -175,4 +246,6 @@ export const toolHandlers: Record<string, ToolHandler> = {
   edit_file: editFile,
   search_text: searchText,
   run_shell: runShell,
+  glob: globFiles,
+  web_fetch: webFetch,
 };

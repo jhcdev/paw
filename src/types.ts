@@ -1,7 +1,13 @@
 export type ProviderName = "anthropic" | "openai" | "gemini" | "groq" | "openrouter" | "ollama";
 
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+};
+
 export type AgentTurnResult = {
   text: string;
+  usage?: TokenUsage;
 };
 
 export interface LlmProvider {

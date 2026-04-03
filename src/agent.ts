@@ -1,11 +1,12 @@
 import { McpManager } from "./mcp.js";
 import { createProvider } from "./providers/index.js";
-import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler } from "./types.js";
+import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage } from "./types.js";
 
 export class CodingAgent {
   private readonly provider: LlmProvider;
   private readonly mcpManager: McpManager;
   private mcpReady = false;
+  private totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
   constructor(args: { provider: ProviderName; apiKey: string; model: string; cwd: string; baseUrl?: string }) {
     this.mcpManager = new McpManager();
@@ -29,7 +30,14 @@ export class CodingAgent {
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
-    return this.provider.runTurn(prompt);
+    const result = await this.provider.runTurn(prompt);
+    this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
+    this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
+    return result;
+  }
+
+  getUsage(): TokenUsage {
+    return { ...this.totalUsage };
   }
 
   getMcpStatus(): { name: string; toolCount: number }[] {
