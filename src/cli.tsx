@@ -68,6 +68,8 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/compact", desc: "compress conversation" },
   { name: "/team", desc: "multi-model collaboration" },
   { name: "/ask", desc: "query another provider" },
+  { name: "/settings", desc: "manage providers" },
+  { name: "/mode", desc: "switch solo/team mode" },
   { name: "/providers", desc: "list available providers" },
   { name: "/init", desc: "generate project context" },
   { name: "/doctor", desc: "diagnostics check" },
@@ -91,6 +93,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [mcpCursor, setMcpCursor] = useState(0);
   const [mcpAddName, setMcpAddName] = useState("");
   const [mcpAddCmd, setMcpAddCmd] = useState("");
+  const [mode, setMode] = useState<"solo" | "team">("solo");
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
@@ -255,6 +258,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /log       - recent git commits",
             "  /history   - export conversation",
             "  /compact   - compress conversation",
+            "  /settings  - manage providers & mode",
+            "  /mode      - switch solo/team mode",
             "  /team <p>  - multi-model collaboration (plan→code→review)",
             "  /ask <p> q - query another provider",
             "  /providers - list available providers & team",
@@ -292,11 +297,46 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       // ── model ──
-      if (line === "/model") {
-        setEntries((c) => [...c,
-          { role: "user", text: line },
-          { role: "system", text: `Provider: ${PROVIDER_LABELS[options.provider] ?? options.provider}\nModel:    ${options.model}\nCWD:      ${options.cwd}` },
-        ]);
+      if (line.startsWith("/model")) {
+        const parts = line.split(/\s+/).slice(1);
+        const validRoles = new Set(["planner", "coder", "reviewer", "tester", "optimizer"]);
+        if (parts.length === 0) {
+          // Show current state
+          let text = `Mode: ${mode.toUpperCase()}\n`;
+          text += `Active: ${PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider()} / ${agent.getActiveModel()}\n`;
+          if (mode === "team") {
+            text += `\nTeam:\n` + agent.getTeam().getRoles().map((r) => `  ${r.role}: ${r.provider}/${r.model}`).join("\n");
+            text += `\n\nChange role: /model <role> <provider> [model]`;
+          } else {
+            text += `\nSwitch: /model <provider> [model]`;
+          }
+          const available = agent.getMulti().getRegistered();
+          text += `\nAvailable: ${available.map((p) => p.name).join(", ")}`;
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
+        } else if (mode === "team" && validRoles.has(parts[0]!)) {
+          // Team mode: /model <role> <provider> [model]
+          const role = parts[0] as "planner" | "coder" | "reviewer" | "tester" | "optimizer";
+          const prov = parts[1] as ProviderName;
+          const mdl = parts[2];
+          if (!prov) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Usage: /model ${role} <provider> [model]` }]);
+          } else if (!agent.getMulti().isRegistered(prov)) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Provider "${prov}" not available.` }]);
+          } else {
+            const cfg = agent.getMulti().getProviderConfig(prov);
+            if (!cfg) { setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Config not found for "${prov}".` }]); return; }
+            agent.getTeam().assignRole(role, { provider: prov, model: mdl ?? cfg.model, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl });
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `${role} → ${prov}/${mdl ?? cfg.model}` }]);
+          }
+        } else {
+          // Solo mode: /model <provider> [model]
+          const result = agent.switchProvider(parts[0] as ProviderName, parts[1]);
+          if (result.ok) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Switched to ${agent.getActiveProvider()}/${agent.getActiveModel()}` }]);
+          } else {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: result.error ?? "Failed." }]);
+          }
+        }
         return;
       }
 
@@ -468,6 +508,43 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+      // ── settings ──
+      if (line === "/settings") {
+        const registered = agent.getMulti().getRegistered();
+        const teamRoles = agent.getTeam().getRoles();
+        let text = `Mode: ${mode.toUpperCase()}\n\n`;
+        text += `Providers (${registered.length}):\n`;
+        text += registered.map((p) => `  ${p.name === options.provider ? "* " : "  "}${p.name} — ${p.model}`).join("\n");
+        if (teamRoles.length > 0) {
+          text += `\n\nTeam Assignments:\n`;
+          text += teamRoles.map((r) => `  ${r.role}: ${r.provider}/${r.model}`).join("\n");
+        }
+        text += `\n\nCommands:\n  /mode solo   — single provider mode\n  /mode team   — multi-model collaboration\n  /providers   — detailed provider list`;
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
+        return;
+      }
+
+      // ── mode ──
+      if (line.startsWith("/mode")) {
+        const target = line.split(/\s+/)[1]?.toLowerCase();
+        if (target === "solo") {
+          setMode("solo");
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Switched to solo mode. Messages go to your primary provider." }]);
+        } else if (target === "team") {
+          if (!agent.getTeam().isReady()) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No providers configured for team mode." }]);
+          } else {
+            setMode("team");
+            const roles = agent.getTeam().getRoles();
+            const roleList = roles.map((r) => `  ${r.role}: ${r.provider}/${r.model}`).join("\n");
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Switched to team mode. All messages go through the pipeline:\n${roleList}` }]);
+          }
+        } else {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Current mode: ${mode}\nUsage: /mode solo | /mode team` }]);
+        }
+        return;
+      }
+
       // ── init ──
       if (line === "/init") {
         setEntries((c) => [...c, { role: "user", text: line }]);
@@ -559,19 +636,30 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       // ── normal message ──
       setEntries((c) => [...c, { role: "user", text: line }]);
       setIsBusy(true);
-      setThinkMsg(randomCatMood());
 
       try {
-        const result = await agent.runTurn(line);
-        setTurnCount((c) => c + 1);
-        setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
+        if (mode === "team" && agent.getTeam().isReady()) {
+          const result = await agent.getTeam().run(line, (phase, provider, model) => {
+            setThinkMsg(`${phase} (${provider}/${model})...`);
+          });
+          const output = result.phases.map((p) =>
+            `--- ${p.role.toUpperCase()} (${p.provider}/${p.model}, ${p.ms}ms) ---\n${p.text}`
+          ).join("\n\n") + `\n\nTotal: ${result.totalMs}ms`;
+          setTurnCount((c) => c + 1);
+          setEntries((c) => [...c, { role: "assistant", text: output }]);
+        } else {
+          setThinkMsg(randomCatMood());
+          const result = await agent.runTurn(line);
+          setTurnCount((c) => c + 1);
+          setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
+        }
       } catch (error) {
         setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
       } finally {
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode],
   );
 
   const providerLabel = PROVIDER_LABELS[options.provider] ?? options.provider;
@@ -710,7 +798,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       </Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
-        <Text color="gray">{providerLabel}/{options.model}</Text>
+        <Text color={mode === "team" ? "#ff9c73" : "gray"}>{mode === "team" ? "TEAM" : providerLabel}/{options.model}</Text>
         <Text color="gray">turns: {turnCount}</Text>
         <Text color={agent.getMcpStatus().length > 0 ? "green" : "gray"}>
           mcp: {agent.getMcpStatus().length > 0 ? `${agent.getMcpStatus().length} server(s)` : "off"}

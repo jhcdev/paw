@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"npx tsc --noEmit 2>&1 && timeout 300 node --import=tsx/esm src/index.ts --provider ollama --model qwen3 \\\"/team write hello world in TypeScript\\\" 2>&1\",\"timeout\":360000,\"description\":\"Buil...",
-  "error": "Exit code 2\nsrc/hello.ts(3,1): error TS1109: Expression expected.",
-  "timestamp": "2026-04-03T08:03:37.300Z",
+  "tool_input_preview": "{\"command\":\"npx tsc --noEmit 2>&1\",\"timeout\":30000,\"description\":\"Type-check all changes\"}",
+  "error": "Exit code 2\nsrc/cli.tsx(329,120): error TS2304: Cannot find name 'reg'.",
+  "timestamp": "2026-04-03T08:10:35.319Z",
   "retry_count": 1
 }

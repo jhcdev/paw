@@ -138,6 +138,11 @@ export class TeamRunner {
 
   isReady(): boolean { return this.agents.has("coder"); }
 
+  /** Reassign a specific role to a different provider/model */
+  assignRole(role: AgentRole, config: { provider: ProviderName; model: string; apiKey: string; baseUrl?: string }): void {
+    this.agents.set(role, { role, ...config, instance: undefined });
+  }
+
   private getOrCreate(role: AgentRole): LlmProvider {
     const agent = this.agents.get(role);
     if (!agent) throw new Error(`No agent for role "${role}"`);

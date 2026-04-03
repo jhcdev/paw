@@ -58,6 +58,11 @@ export class MultiProvider {
     return this.providers.has(name);
   }
 
+  getProviderConfig(name: ProviderName): { apiKey: string; model: string; baseUrl?: string } | null {
+    const entry = this.providers.get(name);
+    return entry ? { apiKey: entry.apiKey, model: entry.model, baseUrl: entry.baseUrl } : null;
+  }
+
   /** Ask a single provider (one-shot, no history) */
   async ask(provider: ProviderName, prompt: string): Promise<AgentTurnResult> {
     const instance = this.getOrCreate(provider);

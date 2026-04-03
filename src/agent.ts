@@ -5,18 +5,22 @@ import { createProvider } from "./providers/index.js";
 import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage } from "./types.js";
 
 export class CodingAgent {
-  private readonly provider: LlmProvider;
+  private provider: LlmProvider;
   private readonly mcpManager: McpManager;
   private readonly multi: MultiProvider;
   private readonly team: TeamRunner;
-  private readonly primaryProvider: ProviderName;
+  private currentProvider: ProviderName;
+  private currentModel: string;
+  private readonly cwd: string;
   private mcpReady = false;
   private totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
   constructor(args: { provider: ProviderName; apiKey: string; model: string; cwd: string; baseUrl?: string }) {
     this.mcpManager = new McpManager();
     this.provider = createProvider(args);
-    this.primaryProvider = args.provider;
+    this.currentProvider = args.provider;
+    this.currentModel = args.model;
+    this.cwd = args.cwd;
     this.multi = new MultiProvider(args.cwd);
     this.multi.register(args.provider, args.apiKey, args.model, args.baseUrl);
     this.team = new TeamRunner(args.cwd);
@@ -74,8 +78,46 @@ export class CodingAgent {
     return this.team;
   }
 
-  getPrimaryProvider(): ProviderName {
-    return this.primaryProvider;
+  getActiveProvider(): ProviderName {
+    return this.currentProvider;
+  }
+
+  getActiveModel(): string {
+    return this.currentModel;
+  }
+
+  /** Switch the active provider and model. Returns true if successful. */
+  switchProvider(provider: ProviderName, model?: string): { ok: boolean; error?: string } {
+    const registered = this.multi.getRegistered();
+    const entry = registered.find((r) => r.name === provider);
+    if (!entry) {
+      return { ok: false, error: `Provider "${provider}" not configured. Available: ${registered.map((r) => r.name).join(", ")}` };
+    }
+    const targetModel = model ?? entry.model;
+    const config = this.multi.getProviderConfig(provider);
+    if (!config) {
+      return { ok: false, error: `Provider "${provider}" not found in registry.` };
+    }
+    this.provider = createProvider({
+      provider,
+      apiKey: config.apiKey,
+      model: targetModel,
+      cwd: this.cwd,
+      baseUrl: config.baseUrl,
+    });
+    this.currentProvider = provider;
+    this.currentModel = targetModel;
+
+    // Re-inject MCP tools if available
+    if (this.mcpReady) {
+      const defs = this.mcpManager.getToolDefinitions();
+      const handlers = this.mcpManager.getToolHandlers();
+      if (defs.length > 0 && "addExternalTools" in this.provider) {
+        (this.provider as LlmProviderWithExternalTools).addExternalTools(defs, handlers);
+      }
+    }
+
+    return { ok: true };
   }
 
   getMcpStatus(): { name: string; toolCount: number }[] {
