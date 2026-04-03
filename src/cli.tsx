@@ -11,7 +11,7 @@ import TextInput from "ink-text-input";
 import type { CodingAgent } from "./agent.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
-import { formatModelList, getAllModels, resolveModelByIndex } from "./model-catalog.js";
+import { formatModelList, getAllFilteredModels, resolveModelByIndex, detectPlan } from "./model-catalog.js";
 
 const execAsync = promisify(exec);
 
@@ -342,15 +342,21 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const parts = line.split(/\s+/).slice(1);
         const validRoles = new Set(["planner", "coder", "reviewer", "tester", "optimizer"]);
         if (parts.length === 0) {
-          // Show catalog + current state
-          const all = getAllModels();
+          // Show plan-filtered catalog
+          const all = await getAllFilteredModels();
           const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
           let text = `Mode: ${mode.toUpperCase()} | Active: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n\n`;
           text += all
             .filter((g) => registered.has(g.provider) || g.provider === agent.getActiveProvider())
             .map((g) => {
               const active = g.provider === agent.getActiveProvider();
-              return `${active ? "* " : "  "}${PROVIDER_LABELS[g.provider] ?? g.provider}:\n${formatModelList(g.provider, active ? agent.getActiveModel() : undefined)}`;
+              const planLabel = g.plan !== "api" && g.plan !== "free" ? ` (${g.plan} plan)` : "";
+              const models = g.models.map((m, i) => {
+                const act = m.id === (active ? agent.getActiveModel() : "") ? " *" : "";
+                const tag = m.minPlan !== "free" ? ` [${m.minPlan}]` : "";
+                return `  ${i + 1}. ${m.id}${act} — ${m.name}${tag}`;
+              }).join("\n");
+              return `${active ? "* " : "  "}${PROVIDER_LABELS[g.provider] ?? g.provider}${planLabel}:\n${models}`;
             }).join("\n\n");
           text += `\n\nSwitch: /model <provider> <number or id>`;
           setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
@@ -372,8 +378,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         } else {
           // Solo mode: /model <provider> [model or number]
           const modelArg = parts[1];
+          const provPlan = await detectPlan(parts[0] as ProviderName);
           const resolvedModel = modelArg && /^\d+$/.test(modelArg)
-            ? resolveModelByIndex(parts[0] as ProviderName, parseInt(modelArg, 10)) ?? modelArg
+            ? resolveModelByIndex(parts[0] as ProviderName, parseInt(modelArg, 10), provPlan) ?? modelArg
             : modelArg;
           const result = agent.switchProvider(parts[0] as ProviderName, resolvedModel);
           if (result.ok) {

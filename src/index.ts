@@ -4,7 +4,7 @@ import { CodingAgent } from "./agent.js";
 import { interactiveLogin, listSavedProviders, logout } from "./auth.js";
 import { startRepl } from "./cli.js";
 import { mcpCli } from "./mcp-cli.js";
-import { formatModelList, getAllModels } from "./model-catalog.js";
+import { getAllFilteredModels } from "./model-catalog.js";
 import { detectProviders } from "./multi-provider.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
@@ -142,13 +142,18 @@ async function main(): Promise<void> {
       await agent.shutdown(); return;
     }
     if (args.prompt === "/model" || args.prompt === "/models" || args.prompt?.startsWith("/models ")) {
-      const all = getAllModels();
+      const all = await getAllFilteredModels();
       const registered = new Set(agent.getMulti().getRegistered().map((p) => p.name));
       process.stdout.write(`Active: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n\n`);
       for (const g of all) {
         if (!registered.has(g.provider) && g.provider !== agent.getActiveProvider()) continue;
         const active = g.provider === agent.getActiveProvider();
-        process.stdout.write(`${active ? "* " : "  "}${g.provider}:\n${formatModelList(g.provider, active ? agent.getActiveModel() : undefined)}\n\n`);
+        const planLabel = g.plan !== "api" && g.plan !== "free" ? ` (${g.plan})` : "";
+        const models = g.models.map((m, i) => {
+          const act = m.id === (active ? agent.getActiveModel() : "") ? " *" : "";
+          return `  ${i + 1}. ${m.id}${act} — ${m.name}`;
+        }).join("\n");
+        process.stdout.write(`${active ? "* " : "  "}${g.provider}${planLabel}:\n${models}\n\n`);
       }
       process.stdout.write(`Switch: /model <provider> <number or id>\n`);
       await agent.shutdown(); return;
