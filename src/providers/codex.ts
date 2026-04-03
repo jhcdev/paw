@@ -1,13 +1,10 @@
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
-import type { AgentTurnResult, LlmProvider, TokenUsage } from "../types.js";
-
-const execAsync = promisify(exec);
+import { spawn } from "node:child_process";
+import type { AgentTurnResult, LlmProvider } from "../types.js";
 
 export type CodexEffort = "low" | "medium" | "high" | "extra_high";
 
 export class CodexProvider implements LlmProvider {
-  private readonly model: string;
+  private model: string;
   private readonly cwd: string;
   private effort: CodexEffort;
 
@@ -25,33 +22,82 @@ export class CodexProvider implements LlmProvider {
     return this.effort;
   }
 
+  setModel(model: string): void {
+    this.model = model;
+  }
+
   clear(): void {
     // Codex exec is stateless per call
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
-    const escapedPrompt = prompt.replace(/'/g, "'\\''");
-    const cmd = [
-      "codex", "exec",
-      "--dangerously-bypass-approvals-and-sandbox",
-      `-c`, `model="${this.model}"`,
-      `-c`, `effort="${this.effort}"`,
-      `'${escapedPrompt}'`,
-    ].join(" ");
+    return new Promise((resolve) => {
+      const args = [
+        "exec",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "-c", `model="${this.model}"`,
+        "-c", `effort="${this.effort}"`,
+        prompt,
+      ];
 
-    try {
-      const { stdout, stderr } = await execAsync(cmd, {
+      const child = spawn("codex", args, {
         cwd: this.cwd,
-        maxBuffer: 5 * 1024 * 1024,
-        timeout: 300000, // 5 min
+        stdio: ["ignore", "pipe", "pipe"], // Close stdin to prevent hanging
+        env: { ...process.env },
       });
 
-      const output = stdout.trim() || stderr.trim() || "(no output)";
-      return { text: output };
-    } catch (error) {
-      const err = error as { stdout?: string; stderr?: string; message?: string };
-      const output = err.stdout?.trim() || err.stderr?.trim() || err.message || "Codex execution failed";
-      return { text: `[Codex Error] ${output}` };
+      let stdout = "";
+      let stderr = "";
+
+      child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+      child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+
+      const timeout = setTimeout(() => {
+        child.kill("SIGTERM");
+        resolve({ text: "[Codex] Timeout after 5 minutes." });
+      }, 300000);
+
+      child.on("close", (code) => {
+        clearTimeout(timeout);
+        const output = extractCodexResponse(stdout) || stderr.trim() || "(no output)";
+        if (code !== 0 && !output) {
+          resolve({ text: `[Codex Error] Exit code ${code}` });
+        } else {
+          resolve({ text: output });
+        }
+      });
+
+      child.on("error", (err) => {
+        clearTimeout(timeout);
+        resolve({ text: `[Codex Error] ${err.message}` });
+      });
+    });
+  }
+}
+
+/** Extract the actual response from codex exec output (skip headers/metadata) */
+function extractCodexResponse(raw: string): string {
+  const lines = raw.split("\n");
+  // Find the "codex" marker line and get content after it
+  let capture = false;
+  const result: string[] = [];
+  for (const line of lines) {
+    if (line.trim() === "codex") {
+      capture = true;
+      continue;
+    }
+    if (capture) {
+      // Stop at "tokens used" line
+      if (line.trim() === "tokens used") break;
+      result.push(line);
     }
   }
+  if (result.length > 0) return result.join("\n").trim();
+  // Fallback: return everything after the header block
+  const headerEnd = raw.indexOf("--------\n");
+  if (headerEnd >= 0) {
+    const afterHeader = raw.slice(raw.indexOf("--------\n", headerEnd + 1) + 9);
+    return afterHeader.trim();
+  }
+  return raw.trim();
 }

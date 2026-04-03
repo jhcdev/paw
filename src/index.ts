@@ -111,8 +111,21 @@ async function main(): Promise<void> {
 
   let auth: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string };
 
-  if (args.provider) {
-    // Explicit provider — go through login flow for that provider
+  if (args.provider && args.prompt) {
+    // Non-interactive: provider + prompt given, try auto-detect credentials
+    const { config: loadEnv } = await import("dotenv");
+    loadEnv({ quiet: true });
+    const detected = await (await import("./multi-provider.js")).detectProviders(process.env as Record<string, string | undefined>);
+    const found = detected.find((d) => d.provider === args.provider);
+    if (found) {
+      auth = { provider: found.provider, apiKey: found.apiKey, model: args.model ?? found.model, baseUrl: found.baseUrl };
+    } else if (args.provider === "codex" || args.provider === "ollama") {
+      auth = { provider: args.provider, apiKey: "", model: args.model ?? (args.provider === "codex" ? "gpt-5.4" : "qwen3") };
+    } else {
+      throw new Error(`No credentials found for ${args.provider}. Run 'paw' interactively to set up.`);
+    }
+  } else if (args.provider) {
+    // Interactive: explicit provider, need login
     auth = await interactiveLogin({ provider: args.provider, model: args.model });
   } else {
     // Auto-detect: try saved credentials / env / login tokens, fallback to Ollama
