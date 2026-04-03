@@ -4,6 +4,7 @@ import { CodingAgent } from "./agent.js";
 import { interactiveLogin, listSavedProviders, logout } from "./auth.js";
 import { startRepl } from "./cli.js";
 import { mcpCli } from "./mcp-cli.js";
+import { detectProviders } from "./multi-provider.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
 

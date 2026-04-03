@@ -66,6 +66,9 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/log", desc: "recent commits" },
   { name: "/history", desc: "export conversation" },
   { name: "/compact", desc: "compress conversation" },
+  { name: "/team", desc: "multi-model collaboration" },
+  { name: "/ask", desc: "query another provider" },
+  { name: "/providers", desc: "list available providers" },
   { name: "/init", desc: "generate project context" },
   { name: "/doctor", desc: "diagnostics check" },
   { name: "/version", desc: "show version" },
@@ -252,6 +255,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /log       - recent git commits",
             "  /history   - export conversation",
             "  /compact   - compress conversation",
+            "  /team <p>  - multi-model collaboration (plan→code→review)",
+            "  /ask <p> q - query another provider",
+            "  /providers - list available providers & team",
             "  /init      - generate project context",
             "  /doctor    - diagnostics check",
             "  /version   - show version",
@@ -388,6 +394,86 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           { role: "system", text: "Conversation compacted. Recent context preserved." },
           ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
         ]);
+        return;
+      }
+
+      // ── providers ──
+      if (line === "/providers") {
+        const registered = agent.getMulti().getRegistered();
+        const teamRoles = agent.getTeam().getRoles();
+        let text = `Available Providers (${registered.length}):\n`;
+        text += registered.map((p) => `  ${p.name === options.provider ? "* " : "  "}${p.name} — ${p.model}`).join("\n");
+        if (teamRoles.length > 0) {
+          text += `\n\nTeam Roles:\n`;
+          text += teamRoles.map((r) => `  ${r.role}: ${r.provider}/${r.model}`).join("\n");
+        }
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
+        return;
+      }
+
+      // ── ask ──
+      if (line.startsWith("/ask ")) {
+        const parts = line.slice(5).trim().split(/\s+/);
+        const targetProvider = parts[0];
+        const askPrompt = parts.slice(1).join(" ");
+        if (!targetProvider || !askPrompt) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /ask <provider> <prompt>\nExample: /ask gemini explain this code" }]);
+          return;
+        }
+        if (!agent.getMulti().isRegistered(targetProvider as any)) {
+          const available = agent.getMulti().getRegistered().map((p) => p.name).join(", ");
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Provider "${targetProvider}" not available.\nAvailable: ${available}` }]);
+          return;
+        }
+        setEntries((c) => [...c, { role: "user", text: line }]);
+        setIsBusy(true);
+        setThinkMsg(`asking ${targetProvider}...`);
+        try {
+          const result = await agent.getMulti().ask(targetProvider as any, askPrompt);
+          setEntries((c) => [...c, { role: "assistant", text: `[${targetProvider}] ${result.text}` }]);
+        } catch (err) {
+          setEntries((c) => [...c, { role: "system", text: `Error: ${err instanceof Error ? err.message : String(err)}` }]);
+        } finally {
+          setIsBusy(false);
+        }
+        return;
+      }
+
+      // ── team ──
+      if (line.startsWith("/team ")) {
+        const teamPrompt = line.slice(6).trim();
+        if (!teamPrompt) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /team <prompt>\nSends task through planner → coder → reviewer pipeline using different models." }]);
+          return;
+        }
+        if (!agent.getTeam().isReady()) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Team mode needs at least 2 providers configured.\nSet API keys in .env for multiple providers (ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, etc.)" }]);
+          return;
+        }
+        setEntries((c) => [...c, { role: "user", text: line }]);
+        setIsBusy(true);
+        try {
+          const result = await agent.getTeam().run(teamPrompt, (phase, provider, model) => {
+            setThinkMsg(`${phase} (${provider}/${model})...`);
+          });
+          const output = [
+            `--- PLAN (${result.plan.provider}/${result.plan.model}, ${result.plan.ms}ms) ---`,
+            result.plan.text,
+            "",
+            `--- IMPLEMENTATION (${result.implementation.provider}/${result.implementation.model}, ${result.implementation.ms}ms) ---`,
+            result.implementation.text,
+            "",
+            `--- REVIEW (${result.review.provider}/${result.review.model}, ${result.review.ms}ms) ---`,
+            result.review.text,
+            "",
+            `Total: ${result.totalMs}ms`,
+          ].join("\n");
+          setEntries((c) => [...c, { role: "assistant", text: output }]);
+        } catch (err) {
+          setEntries((c) => [...c, { role: "system", text: `Team error: ${err instanceof Error ? err.message : String(err)}` }]);
+        } finally {
+          setIsBusy(false);
+        }
         return;
       }
 
