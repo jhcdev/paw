@@ -29,7 +29,7 @@ async function readConfig(cwd: string): Promise<McpConfigFile> {
 }
 
 async function writeConfig(cwd: string, config: McpConfigFile): Promise<void> {
-  await fs.writeFile(configPath(cwd), JSON.stringify(config, null, 2), "utf8");
+  await fs.writeFile(configPath(cwd), JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 export async function mcpCli(argv: string[], cwd: string): Promise<void> {

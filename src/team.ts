@@ -61,7 +61,7 @@ async function loadScores(): Promise<ScoresData> {
 
 async function saveScores(data: ScoresData): Promise<void> {
   await fs.mkdir(path.dirname(SCORES_FILE), { recursive: true });
-  await fs.writeFile(SCORES_FILE, JSON.stringify(data, null, 2), "utf8");
+  await fs.writeFile(SCORES_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
 }
 
 async function recordPerformance(provider: ProviderName, role: AgentRole, ms: number, success: boolean): Promise<void> {

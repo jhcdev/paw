@@ -1,4 +1,5 @@
 import { config as loadEnv } from "dotenv";
+import { statSync } from "node:fs";
 import { z } from "zod";
 import type { ProviderName } from "./types.js";
 
@@ -44,6 +45,13 @@ function isPlaceholder(value: string | undefined): boolean {
 }
 
 export function loadConfig(overrides?: Partial<Pick<AppConfig, "provider" | "model">>): AppConfig {
+  try {
+    const envStat = statSync(".env", { throwIfNoEntry: false } as any);
+    if (envStat && (envStat.mode & 0o077) !== 0) {
+      process.stderr.write("Warning: .env is readable by other users. Run: chmod 600 .env\n");
+    }
+  } catch {}
+
   const parsed = envSchema.safeParse(process.env);
   if (!parsed.success) {
     const message = parsed.error.issues.map((issue) => issue.message).join(", ");

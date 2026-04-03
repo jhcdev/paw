@@ -171,11 +171,17 @@ export class McpManager {
       transport = new SseTransport(new URL(config.url)) as unknown as SSEClientTransport;
     } else {
       if (!config.command) throw new Error(`${name}: missing "command" for stdio transport`);
+      const SAFE_ENV_KEYS = ["PATH", "HOME", "NODE_ENV", "LANG", "TERM", "SHELL", "USER", "TMPDIR", "TMP"];
+      const safeEnv: Record<string, string> = {};
+      for (const key of SAFE_ENV_KEYS) {
+        if (process.env[key]) safeEnv[key] = process.env[key]!;
+      }
+
       transport = new StdioClientTransport({
         command: config.command,
         args: config.args ?? [],
         env: {
-          ...process.env as Record<string, string>,
+          ...safeEnv,
           ...(config.env ?? {}),
         },
         cwd,
@@ -247,7 +253,7 @@ export class McpManager {
 
   async writeConfigFile(config: McpConfigFile): Promise<void> {
     const filePath = this.getConfigFilePath();
-    await fs.writeFile(filePath, JSON.stringify(config, null, 2), "utf8");
+    await fs.writeFile(filePath, JSON.stringify(config, null, 2), { mode: 0o600 });
   }
 
   async addServer(name: string, config: McpServerConfig): Promise<{ ok: boolean; error?: string }> {

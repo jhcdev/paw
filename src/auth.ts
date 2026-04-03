@@ -120,7 +120,7 @@ export async function interactiveLogin(overrides?: {
     }
 
     if (!apiKey && saved?.apiKey) {
-      const masked = saved.apiKey.slice(0, 8) + "..." + saved.apiKey.slice(-4);
+      const masked = "***..." + saved.apiKey.slice(-4);
       const reuse = await rl.question(`  ${pc.red("=^.^=")} Use saved key (${pc.gray(masked)})? [Y/n]: `);
       if (!reuse || reuse.toLowerCase() !== "n") {
         apiKey = saved.apiKey;
@@ -195,7 +195,7 @@ export async function listSavedProviders(): Promise<void> {
   process.stdout.write(`  =^.^= Saved credentials:\n\n`);
   for (const p of saved) {
     const key = creds[p as ProviderName]!.apiKey;
-    const masked = key.slice(0, 8) + "..." + key.slice(-4);
+    const masked = "***..." + key.slice(-4);
     const model = creds[p as ProviderName]!.model ?? "(default)";
     process.stdout.write(`    ${pc.red("~")} ${pc.bold(p)}: ${pc.gray(masked)} | model: ${model}\n`);
   }
