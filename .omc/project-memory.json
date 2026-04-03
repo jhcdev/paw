@@ -127,9 +127,15 @@
       "type": "file"
     },
     {
+      "path": "src/providers/codex.ts",
+      "accessCount": 3,
+      "lastAccessed": 1775223128294,
+      "type": "directory"
+    },
+    {
       "path": "src/providers/claude-cli.ts",
-      "accessCount": 1,
-      "lastAccessed": 1775223020834,
+      "accessCount": 2,
+      "lastAccessed": 1775223090129,
       "type": "file"
     }
   ],

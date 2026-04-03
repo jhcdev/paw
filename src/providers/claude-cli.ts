@@ -32,20 +32,19 @@ export class ClaudeCliProvider implements LlmProvider {
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
     return new Promise((resolve) => {
-      const isRoot = process.getuid?.() === 0;
       const args = [
         "-p",
         "--model", this.model,
         "--effort", this.effort,
         "--no-session-persistence",
-        ...(isRoot ? [] : ["--dangerously-skip-permissions"]),
+        "--dangerously-skip-permissions",
         prompt,
       ];
 
       const child = spawn("claude", args, {
         cwd: this.cwd,
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env },
+        env: { ...process.env, IS_SANDBOX: "1" },
       });
 
       let stdout = "";
