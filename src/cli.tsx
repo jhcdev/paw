@@ -123,21 +123,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   return (
     <Box flexDirection="column" paddingX={1}>
       <Box marginTop={1} borderStyle="round" borderColor="#d97757" flexDirection="column" paddingX={2} paddingY={1}>
-        <Box justifyContent="center">
-          <Text color="#ff9c73" bold>
-            {"  /\\_/\\   Cat's Claw v1.0"}
-          </Text>
-        </Box>
-        <Box justifyContent="center">
-          <Text color="#ff9c73">
-            {" ( o.o )  Scratch your code into shape~"}
-          </Text>
-        </Box>
-        <Box justifyContent="center">
-          <Text color="#ff9c73">
-            {"  > ^ <   "}
-            <Text color="gray" italic>meow~</Text>
-          </Text>
+        <Box flexDirection="column">
+          <Text color="#ff9c73" bold>{"  /\\_/\\   Cat's Claw v1.0"}</Text>
+          <Text color="#ff9c73">{" ( o.o )  Scratch your code into shape~"}</Text>
+          <Text color="#ff9c73">{"  > ^ <   "}<Text color="gray" italic>meow~</Text></Text>
         </Box>
 
         <Box marginTop={1} borderStyle="single" borderColor="#553322" paddingX={1}>
