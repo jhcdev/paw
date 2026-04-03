@@ -1,7 +1,7 @@
 {
   "tool_name": "Bash",
-  "tool_input_preview": "{\"command\":\"GH_TOKEN=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 gh repo delete jhcdev/onyx-coder --yes 2>&1\",\"description\":\"Delete onyx-coder repo\"}",
-  "error": "Exit code 1\nHTTP 404: Not Found (https://api.github.com/repos/jhcdev/onyx-coder)",
-  "timestamp": "2026-04-03T06:50:06.177Z",
-  "retry_count": 1
+  "tool_input_preview": "{\"command\":\"rm bin/paw.mjs && chmod +x bin/paw && npm link 2>&1 | tail -2 && paw --help 2>&1 && echo \\\"---\\\" && paw mcp list 2>&1\",\"timeout\":30000,\"description\":\"Relink and test paw command\"}",
+  "error": "Exit code 1\n\nfound 0 vulnerabilities\n\nnode:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\nError [ERR_MODULE_NOT_FOUND]: Cannot find module '/usr/src/index.ts' imported from /home/dev/cats-claw/\n    at finalizeResolution (node:internal/modules/esm/resolve:275:11)\n    at moduleResolve (node:internal/modules/esm/resolve:865:10)\n    at defaultResolve (node:internal/modules/esm/resolve:991:11)\n    at nextResolve (node:internal/modules/esm/hooks:785:28)\n    at resolveBase (file:///h...",
+  "timestamp": "2026-04-03T07:33:08.856Z",
+  "retry_count": 2
 }

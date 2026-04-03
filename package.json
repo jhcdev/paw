@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "paw": "./bin/paw"
+  },
   "description": "Cat's Claw — Multi-provider AI coding agent for the terminal.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
