@@ -55,10 +55,35 @@ export class CodingAgent {
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
-    const result = await this.provider.runTurn(prompt);
-    this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
-    this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
-    return result;
+    try {
+      const result = await this.provider.runTurn(prompt);
+      this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
+      this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
+      return result;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const lower = msg.toLowerCase();
+      const isRetryable = lower.includes("rate limit") || lower.includes("429") ||
+        lower.includes("quota") || lower.includes("exceeded") || lower.includes("401") ||
+        lower.includes("403") || lower.includes("billing") || lower.includes("credit");
+
+      if (isRetryable) {
+        // Try fallback to another registered provider
+        const registered = this.multi.getRegistered();
+        for (const alt of registered) {
+          if (alt.name !== this.currentProvider) {
+            const switched = this.switchProvider(alt.name);
+            if (switched.ok) {
+              const fallbackResult = await this.provider.runTurn(prompt);
+              this.totalUsage.inputTokens += fallbackResult.usage?.inputTokens ?? 0;
+              this.totalUsage.outputTokens += fallbackResult.usage?.outputTokens ?? 0;
+              return { ...fallbackResult, text: `[Fallback: ${alt.name}/${alt.model}]\n${fallbackResult.text}` };
+            }
+          }
+        }
+      }
+      throw err;
+    }
   }
 
   getUsage(): TokenUsage {

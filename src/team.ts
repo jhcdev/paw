@@ -118,6 +118,24 @@ export async function getTeamScores(): Promise<{ provider: ProviderName; role: A
   return out;
 }
 
+/** Check if an error is retryable (rate limit, auth, quota) */
+function isRetryableError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("rate limit") ||
+    lower.includes("429") ||
+    lower.includes("quota") ||
+    lower.includes("exceeded") ||
+    lower.includes("insufficient") ||
+    lower.includes("unauthorized") ||
+    lower.includes("401") ||
+    lower.includes("403") ||
+    lower.includes("credit") ||
+    lower.includes("billing") ||
+    lower.includes("token") && lower.includes("expired")
+  );
+}
+
 // ── Team Runner ──
 
 export class TeamRunner {
@@ -163,9 +181,42 @@ export class TeamRunner {
       return { role, provider: agent.provider, model: agent.model, text: result.text, ms };
     } catch (err) {
       const ms = Date.now() - start;
+      const errMsg = err instanceof Error ? err.message : String(err);
       await recordPerformance(agent.provider, role, ms, false).catch(() => {});
-      return { role, provider: agent.provider, model: agent.model, text: `[Error: ${err instanceof Error ? err.message : String(err)}]`, ms };
+
+      // Fallback: try another provider if rate limit, auth error, or quota exceeded
+      if (isRetryableError(errMsg)) {
+        const fallback = this.findFallback(role, agent.provider);
+        if (fallback) {
+          onPhase(`${ROLE_LABELS[role]} (fallback)`, fallback.provider, fallback.model);
+          const fbStart = Date.now();
+          try {
+            const fbResult = await this.getOrCreate(role).runTurn(`${ROLE_PROMPTS[role]}\n\n${prompt}`);
+            const fbMs = Date.now() - fbStart;
+            await recordPerformance(fallback.provider, role, fbMs, true).catch(() => {});
+            return { role, provider: fallback.provider, model: fallback.model, text: fbResult.text, ms: ms + fbMs };
+          } catch {
+            // Fallback also failed
+          }
+        }
+      }
+
+      return { role, provider: agent.provider, model: agent.model, text: `[Error: ${errMsg}]`, ms };
     }
+  }
+
+  /** Find a different provider to fall back to for a given role */
+  private findFallback(role: AgentRole, failedProvider: ProviderName): TeamAgent | null {
+    // Look for any other configured agent with a different provider
+    for (const [, agent] of this.agents) {
+      if (agent.provider !== failedProvider) {
+        // Temporarily reassign this role to the fallback provider
+        const fallbackAgent: TeamAgent = { role, provider: agent.provider, model: agent.model, apiKey: agent.apiKey, baseUrl: agent.baseUrl };
+        this.agents.set(role, fallbackAgent);
+        return fallbackAgent;
+      }
+    }
+    return null;
   }
 
   async run(prompt: string, onPhase: (phase: string, provider: string, model: string) => void): Promise<TeamResult> {
