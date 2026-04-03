@@ -22,3 +22,5 @@
 {"t":0,"agent":"a169fa6","agent_type":"security-reviewer","event":"agent_stop","success":true,"duration_ms":119256}
 {"t":0,"agent":"a4a3f62","agent_type":"executor","event":"agent_start","parent_mode":"none"}
 {"t":0,"agent":"a4a3f62","agent_type":"executor","event":"agent_stop","success":true,"duration_ms":147780}
+{"t":0,"agent":"a5af2a4","agent_type":"executor","event":"agent_start","parent_mode":"none"}
+{"t":0,"agent":"a5af2a4","agent_type":"executor","event":"agent_stop","success":true,"duration_ms":123373}

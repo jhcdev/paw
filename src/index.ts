@@ -109,10 +109,29 @@ async function main(): Promise<void> {
   if (args.doList) { await listSavedProviders(); return; }
   if (args.doLogout) { await logout(args.logoutProvider); return; }
 
-  const auth = await interactiveLogin({
-    provider: args.provider,
-    model: args.model,
-  });
+  let auth: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string };
+
+  if (args.provider) {
+    // Explicit provider — go through login flow for that provider
+    auth = await interactiveLogin({ provider: args.provider, model: args.model });
+  } else {
+    // Auto-detect: try saved credentials / env / login tokens, fallback to Ollama
+    const { config: loadEnv } = await import("dotenv");
+    loadEnv({ quiet: true });
+    const detected = await (await import("./multi-provider.js")).detectProviders(process.env as Record<string, string | undefined>);
+
+    if (detected.length > 0) {
+      // Pick best available: anthropic > openai > gemini > groq > openrouter > ollama
+      const priority: ProviderName[] = ["anthropic", "openai", "gemini", "groq", "openrouter", "ollama"];
+      const best = priority.find((p) => detected.some((d) => d.provider === p));
+      const chosen = detected.find((d) => d.provider === best) ?? detected[0]!;
+      auth = { provider: chosen.provider, apiKey: chosen.apiKey, model: args.model ?? chosen.model, baseUrl: chosen.baseUrl };
+      process.stdout.write(`${pc.gray(`=^.^= Auto-detected: ${auth.provider}/${auth.model}`)}\n`);
+    } else {
+      // Nothing detected — ask user to pick
+      auth = await interactiveLogin({ model: args.model });
+    }
+  }
 
   const agent = new CodingAgent({
     provider: auth.provider,

@@ -59,6 +59,7 @@ function formatTokens(n: number): string {
 const COMMANDS: { name: string; desc: string }[] = [
   { name: "/help", desc: "show all commands" },
   { name: "/status", desc: "providers, usage, cost overview" },
+  { name: "/settings", desc: "manage provider API keys" },
   { name: "/model", desc: "list/switch models & providers" },
   { name: "/team", desc: "team dashboard & collaboration" },
   { name: "/ask", desc: "query another provider" },
@@ -92,6 +93,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [teamPanel, setTeamPanel] = useState<"off" | "list" | "pick-role" | "pick-provider" | "pick-model">("off");
   const [teamEditRole, setTeamEditRole] = useState<string>("");
   const [teamEditProvider, setTeamEditProvider] = useState<string>("");
+  const [settingsPanel, setSettingsPanel] = useState<"off" | "list" | "add-key">("off");
+  const [settingsProvider, setSettingsProvider] = useState<string>("");
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
@@ -122,6 +125,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         { role: "system", text: "Conversation compacted. Recent context preserved." },
         ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
       ]);
+      return;
+    }
+
+    // Settings panel
+    if (settingsPanel !== "off") {
+      if (key.escape) { setSettingsPanel("off"); setInput(""); return; }
       return;
     }
 
@@ -233,6 +242,60 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const list = await agent.getMcpFullStatus();
         setMcpServers(list.map((s) => ({ name: s.name, connected: s.connected, toolCount: s.toolCount, command: s.config.command })));
         setMcpMode("list");
+        return;
+      }
+
+      // ── Settings panel submit ──
+      if (settingsPanel === "list") {
+        const registered = agent.getMulti().getRegistered();
+        const num = parseInt(line, 10);
+        if (num >= 1 && num <= registered.length) {
+          // Selected a provider to view/edit
+          setSettingsProvider(registered[num - 1]!.name);
+          setSettingsPanel("add-key");
+          setInput("");
+        } else if (line.toLowerCase() === "a" || line.toLowerCase() === "add") {
+          // Show available providers to add
+          setSettingsPanel("add-key");
+          setSettingsProvider("");
+          setInput("");
+        } else {
+          setSettingsPanel("off");
+          setInput("");
+        }
+        return;
+      }
+      if (settingsPanel === "add-key") {
+        if (!settingsProvider) {
+          // User is typing provider name
+          const validProviders = ["anthropic", "openai", "gemini", "groq", "openrouter"];
+          if (validProviders.includes(line.toLowerCase())) {
+            setSettingsProvider(line.toLowerCase());
+            setInput("");
+          } else {
+            setSettingsPanel("list");
+            setInput("");
+          }
+          return;
+        }
+        // User typed API key
+        if (line.trim()) {
+          // Save credential
+          const { promises: fsPromises } = await import("node:fs");
+          const credPath = (await import("node:path")).join((await import("node:os")).homedir(), ".cats-claw", "credentials.json");
+          let creds: Record<string, any> = {};
+          try { creds = JSON.parse(await fsPromises.readFile(credPath, "utf8")); } catch {}
+          creds[settingsProvider] = { apiKey: line.trim(), model: undefined };
+          await fsPromises.mkdir((await import("node:path")).dirname(credPath), { recursive: true });
+          await fsPromises.writeFile(credPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
+          // Register with multi-provider
+          const defaults: Record<string, string> = { anthropic: "claude-sonnet-4-20250514", openai: "gpt-5-mini", gemini: "gemini-2.5-flash", groq: "openai/gpt-oss-20b", openrouter: "anthropic/claude-sonnet-4" };
+          agent.getMulti().register(settingsProvider as any, line.trim(), defaults[settingsProvider] ?? "default");
+          setEntries((c) => [...c, { role: "system", text: `${settingsProvider} configured and saved.` }]);
+        }
+        setSettingsPanel("off");
+        setSettingsProvider("");
+        setInput("");
         return;
       }
 
@@ -518,8 +581,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         // No arg = show status
       }
 
+      // ── settings panel ──
+      if (line === "/settings") {
+        setSettingsPanel("list");
+        return;
+      }
+
       // ── status ──
-      if (line === "/status" || line === "/settings" || line === "/providers" || line === "/cost" || line === "/version") {
+      if (line === "/status" || line === "/providers" || line === "/cost" || line === "/version") {
         const registered = agent.getMulti().getRegistered();
         const teamRoles = agent.getTeam().getRoles();
         const usageReport = agent.tracker.formatReport();
@@ -642,7 +711,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, teamEditProvider],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, teamEditProvider, settingsPanel, settingsProvider],
   );
 
   const providerLabel = PROVIDER_LABELS[options.provider] ?? options.provider;
@@ -700,6 +769,44 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           <Text color="#ff9c73" bold>{"=^.^= "}</Text>
           <Text color="gray" italic>{thinkMsg}</Text>
           <Newline />
+        </Box>
+      ) : null}
+
+      {settingsPanel !== "off" ? (
+        <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+          <Text color="#ff9c73" bold>Provider Settings</Text>
+
+          {settingsPanel === "list" ? (
+            <Box flexDirection="column" marginTop={1}>
+              {agent.getMulti().getRegistered().map((p, i) => (
+                <Box key={p.name}>
+                  <Text color={p.name === agent.getActiveProvider() ? "#ff9c73" : "#ffb088"} bold>
+                    {`  ${i + 1}. `}
+                  </Text>
+                  <Text color={p.name === agent.getActiveProvider() ? "#ff9c73" : "gray"}>
+                    {`${p.name} — ${p.model}`}
+                  </Text>
+                  <Text color="green">{p.name === agent.getActiveProvider() ? " (active)" : ""}</Text>
+                </Box>
+              ))}
+              <Box marginTop={1}>
+                <Text color="#cc8866">Number to edit | <Text bold>a</Text>(dd provider) | Enter(back)</Text>
+              </Box>
+            </Box>
+          ) : null}
+
+          {settingsPanel === "add-key" && !settingsProvider ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="#cc8866">Provider name (anthropic/openai/gemini/groq/openrouter):</Text>
+            </Box>
+          ) : null}
+
+          {settingsPanel === "add-key" && settingsProvider ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray">Provider: <Text bold color="#ffb088">{settingsProvider}</Text></Text>
+              <Text color="#cc8866">Enter API key (Enter to cancel):</Text>
+            </Box>
+          ) : null}
         </Box>
       ) : null}
 
