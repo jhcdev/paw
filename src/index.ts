@@ -124,7 +124,37 @@ async function main(): Promise<void> {
   await Promise.all([agent.initMcp(args.cwd), agent.initTeam()]);
 
   if (args.prompt) {
-    // Handle /team in one-shot mode
+    // Handle slash commands in one-shot mode
+    if (args.prompt === "/settings" || args.prompt === "/providers") {
+      const registered = agent.getMulti().getRegistered();
+      const teamRoles = agent.getTeam().getRoles();
+      process.stdout.write(`Provider: ${pc.cyan(agent.getActiveProvider())}/${agent.getActiveModel()}\n`);
+      process.stdout.write(`\nAvailable Providers (${registered.length}):\n`);
+      for (const p of registered) process.stdout.write(`  ${p.name === agent.getActiveProvider() ? "* " : "  "}${p.name} — ${p.model}\n`);
+      if (teamRoles.length > 0) {
+        process.stdout.write(`\nTeam Roles:\n`);
+        for (const r of teamRoles) process.stdout.write(`  ${r.role}: ${r.provider}/${r.model}\n`);
+      }
+      process.stdout.write(`\nMCP: ${agent.getMcpStatus().length} server(s)\n`);
+      await agent.shutdown(); return;
+    }
+    if (args.prompt === "/model") {
+      process.stdout.write(`Provider: ${agent.getActiveProvider()}\nModel:    ${agent.getActiveModel()}\n`);
+      const registered = agent.getMulti().getRegistered();
+      process.stdout.write(`Available: ${registered.map((p) => p.name).join(", ")}\n`);
+      await agent.shutdown(); return;
+    }
+    if (args.prompt === "/doctor") {
+      process.stdout.write(`Node: ${process.version}\nPlatform: ${process.platform} ${process.arch}\n`);
+      process.stdout.write(`Provider: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n`);
+      process.stdout.write(`MCP: ${agent.getMcpStatus().length} server(s)\n`);
+      process.stdout.write(`Usage: ${agent.getUsage().inputTokens + agent.getUsage().outputTokens} tokens\n`);
+      await agent.shutdown(); return;
+    }
+    if (args.prompt === "/version") {
+      process.stdout.write("Cat's Claw v1.0.0\n");
+      await agent.shutdown(); return;
+    }
     if (args.prompt.startsWith("/team ")) {
       const teamPrompt = args.prompt.slice(6).trim();
       if (!agent.getTeam().isReady()) {
