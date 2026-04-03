@@ -93,7 +93,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [teamPanel, setTeamPanel] = useState<"off" | "list" | "pick-role" | "pick-provider" | "pick-model">("off");
   const [teamEditRole, setTeamEditRole] = useState<string>("");
   const [teamEditProvider, setTeamEditProvider] = useState<string>("");
-  const [settingsPanel, setSettingsPanel] = useState<"off" | "list" | "add-key">("off");
+  const [settingsPanel, setSettingsPanel] = useState<"off" | "list" | "choose-auth" | "add-key">("off");
   const [settingsProvider, setSettingsProvider] = useState<string>("");
 
   const suggestions = useMemo(() => {
@@ -250,12 +250,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const registered = agent.getMulti().getRegistered();
         const num = parseInt(line, 10);
         if (num >= 1 && num <= registered.length) {
-          // Selected a provider to view/edit
           setSettingsProvider(registered[num - 1]!.name);
-          setSettingsPanel("add-key");
+          setSettingsPanel("choose-auth");
           setInput("");
         } else if (line.toLowerCase() === "a" || line.toLowerCase() === "add") {
-          // Show available providers to add
           setSettingsPanel("add-key");
           setSettingsProvider("");
           setInput("");
@@ -265,12 +263,51 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         }
         return;
       }
+      if (settingsPanel === "choose-auth") {
+        const choice = line.toLowerCase();
+        if (choice === "k" || choice === "key") {
+          setSettingsPanel("add-key");
+          setInput("");
+        } else if (choice === "l" || choice === "login") {
+          // Try to use existing login
+          let token: string | null = null;
+          let method = "";
+          if (settingsProvider === "anthropic") {
+            try {
+              const { readClaudeAuth } = await import("./claude-auth.js");
+              const auth = await readClaudeAuth();
+              if (auth && !auth.expired) { token = auth.accessToken; method = `Claude (${auth.subscriptionType ?? "login"})`; }
+              else if (auth?.expired) { setEntries((c) => [...c, { role: "system", text: "Claude login expired. Run 'claude' to refresh." }]); }
+            } catch {}
+          } else if (settingsProvider === "openai") {
+            try {
+              const { readCodexAuth } = await import("./codex-auth.js");
+              const auth = await readCodexAuth();
+              if (auth) { token = auth.accessToken; method = `Codex (${auth.authMode})`; }
+            } catch {}
+          }
+          if (token) {
+            const defaults: Record<string, string> = { anthropic: "claude-sonnet-4-20250514", openai: "gpt-5-mini" };
+            agent.getMulti().register(settingsProvider as any, token, defaults[settingsProvider] ?? "default");
+            setEntries((c) => [...c, { role: "system", text: `${settingsProvider} connected via ${method}` }]);
+          } else {
+            setEntries((c) => [...c, { role: "system", text: `No login found for ${settingsProvider}. Use API key instead.` }]);
+          }
+          setSettingsPanel("off");
+          setSettingsProvider("");
+          setInput("");
+        } else {
+          setSettingsPanel("list");
+          setInput("");
+        }
+        return;
+      }
       if (settingsPanel === "add-key") {
         if (!settingsProvider) {
-          // User is typing provider name
           const validProviders = ["anthropic", "openai", "gemini", "groq", "openrouter"];
           if (validProviders.includes(line.toLowerCase())) {
             setSettingsProvider(line.toLowerCase());
+            setSettingsPanel("choose-auth");
             setInput("");
           } else {
             setSettingsPanel("list");
@@ -794,6 +831,23 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                 <Text color="#cc8866">Type number + Enter to edit key</Text>
                 <Text color="#cc8866">Type <Text bold>a</Text> + Enter to add new provider</Text>
                 <Text color="#cc8866">Press Enter or Esc to go back</Text>
+              </Box>
+            </Box>
+          ) : null}
+
+          {settingsPanel === "choose-auth" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray">Provider: <Text bold color="#ffb088">{settingsProvider}</Text></Text>
+              <Box marginTop={1} flexDirection="column">
+                {(settingsProvider === "anthropic" || settingsProvider === "openai") ? (
+                  <>
+                    <Text color="#cc8866">Type <Text bold>l</Text> + Enter → use {settingsProvider === "anthropic" ? "Claude Code" : "Codex"} login</Text>
+                    <Text color="#cc8866">Type <Text bold>k</Text> + Enter → enter API key manually</Text>
+                  </>
+                ) : (
+                  <Text color="#cc8866">Type <Text bold>k</Text> + Enter → enter API key</Text>
+                )}
+                <Text color="#cc8866">Enter or Esc to go back</Text>
               </Box>
             </Box>
           ) : null}
