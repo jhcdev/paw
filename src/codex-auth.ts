@@ -63,3 +63,16 @@ export async function hasCodexAuth(): Promise<boolean> {
     return false;
   }
 }
+
+/** Verify if the token actually works against OpenAI API */
+export async function verifyCodexToken(token: string): Promise<boolean> {
+  try {
+    const res = await fetch("https://api.openai.com/v1/models", {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

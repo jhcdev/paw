@@ -111,10 +111,18 @@ export async function interactiveLogin(overrides?: {
     if (provider === "openai" && !saved?.apiKey) {
       const codexAuth = await readCodexAuth();
       if (codexAuth) {
-        const useCodex = await rl.question(`  ${pc.red("=^.^=")} Use Codex login (${pc.green(codexAuth.authMode)})? [Y/n]: `);
-        if (!useCodex || useCodex.toLowerCase() !== "n") {
-          apiKey = codexAuth.accessToken;
-          process.stdout.write(`  ${pc.green("~")} Using Codex ${codexAuth.authMode} login~ meow\n`);
+        const { verifyCodexToken } = await import("./codex-auth.js");
+        process.stdout.write(`  ${pc.gray("~")} Checking Codex token...\n`);
+        const valid = await verifyCodexToken(codexAuth.accessToken);
+        if (valid) {
+          const useCodex = await rl.question(`  ${pc.red("=^.^=")} Use Codex login (${pc.green(codexAuth.authMode)})? [Y/n]: `);
+          if (!useCodex || useCodex.toLowerCase() !== "n") {
+            apiKey = codexAuth.accessToken;
+            process.stdout.write(`  ${pc.green("~")} Using Codex ${codexAuth.authMode} login~ meow\n`);
+          }
+        } else {
+          process.stdout.write(`  ${pc.yellow("~")} Codex login found but token lacks API access.\n`);
+          process.stdout.write(`  ${pc.yellow("~")} Get an API key at ${pc.gray("platform.openai.com/api-keys")}\n`);
         }
       }
     }

@@ -140,12 +140,12 @@ export async function detectProviders(env: Record<string, string | undefined>): 
   }
   check("openai", "OPENAI_API_KEY", "OPENAI_MODEL", "gpt-5-mini");
 
-  // Codex login fallback for OpenAI
+  // Codex login fallback for OpenAI (verify token works first)
   if (!found.some((p) => p.provider === "openai")) {
     try {
-      const { readCodexAuth } = await import("./codex-auth.js");
+      const { readCodexAuth, verifyCodexToken } = await import("./codex-auth.js");
       const codex = await readCodexAuth();
-      if (codex) {
+      if (codex && await verifyCodexToken(codex.accessToken)) {
         found.push({ provider: "openai", apiKey: codex.accessToken, model: env.OPENAI_MODEL?.trim() || "gpt-5-mini" });
       }
     } catch {}
