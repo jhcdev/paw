@@ -127,7 +127,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       // Skip control characters handled by useInput (arrows, escape, ctrl+*, etc.)
       if (s === "\r" || s === "\n") return; // Enter — handled by useInput
       if (s === "\x7f" || s === "\b") return; // Backspace — handled by useInput
-      if (s.charCodeAt(0) < 32 && s.charCodeAt(0) !== 9) return; // Control chars
+      // Ctrl+A (char code 1) — open activity viewer
+      if (s.charCodeAt(0) === 1) {
+        const acts = agent.activityLog.getRecent(5);
+        if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); }
+        return;
+      }
+      if (s.charCodeAt(0) < 32 && s.charCodeAt(0) !== 9) return; // Other control chars
       if (s.startsWith("\x1b")) return; // Escape sequences (arrows etc.)
       // Regular text input
       setInput((prev) => {
