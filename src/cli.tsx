@@ -1571,7 +1571,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       <Box borderStyle="round" borderColor="#d97757" paddingX={1}>
         <Text color="#ff9c73" bold>{" > "}</Text>
-        <Text>{input}</Text><Text color="#ff9c73">█</Text>      </Box>
+        <Text>{input}</Text><Text color="#ff9c73">█</Text></Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
         <Text color={mode === "team" ? "#ff9c73" : "gray"}>{mode === "team" ? "TEAM" : providerLabel}/{agent.getActiveModel()}</Text>
