@@ -107,6 +107,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const inputRef = React.useRef("");
   const [cancelRef] = useState({ current: false });
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
+  const [pendingDisplay, setPendingDisplay] = useState<string[]>([]);
   const [turnCount, setTurnCount] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [mcpMode, setMcpMode] = useState<"off" | "list" | "add-name" | "add-cmd" | "add-args" | "remove">("off");
@@ -625,10 +626,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── queue if busy ──
+      // ── queue if busy (show in pending area, process merged after response) ──
       if (busyRef.current) {
         pendingRef.current.push(line);
-        setEntries((c) => [...c, { role: "user", text: line }]);
+        setPendingDisplay((c) => [...c, line]);
         return;
       }
 
@@ -1148,12 +1149,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       } finally {
         busyRef.current = false;
         setIsBusy(false);
-        // Merge all queued messages into one and process as a single turn
+        // Move pending messages to entries, then process as one merged turn
         if (pendingRef.current.length > 0) {
-          const merged = pendingRef.current.join("\n").trim();
+          const queued = pendingRef.current.slice();
+          const merged = queued.join("\n").trim();
           pendingRef.current = [];
+          setPendingDisplay([]);
           if (merged) {
-            await new Promise((r) => setTimeout(r, 10));
+            setEntries((c) => [...c, ...queued.map((q) => ({ role: "user" as const, text: q }))]);
             await submit(merged, true);
           }
         }
@@ -1221,6 +1224,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           <Text color="gray" italic>  Ctrl+C or Esc to cancel</Text>
         </Box>
       ) : null}
+
+      {pendingDisplay.length > 0 && (
+        <Box flexDirection="column">
+          {pendingDisplay.map((msg, i) => (
+            <Box key={`pending-${i}`} marginBottom={1}>
+              <Text color="#ffb088" bold>{"▸ "}</Text>
+              <Text color="gray">{msg}</Text>
+            </Box>
+          ))}
+        </Box>
+      )}
 
       {modelPanel !== "off" ? (
         <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
