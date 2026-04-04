@@ -117,6 +117,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [activityView, setActivityView] = useState<string | null>(null); // viewing activity ID
   const [activityCursor, setActivityCursor] = useState(0);
   const [activityScroll, setActivityScroll] = useState(0);
+  const [statusPanel, setStatusPanel] = useState(false);
 
   // All input handled in useInput below (no separate useStdin)
 
@@ -158,8 +159,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   useInput((ch, key) => {
     if (key.ctrl && ch === "c") exit();
 
+    // Status panel
+    if (statusPanel) {
+      if (key.escape) { setStatusPanel(false); return; }
+      return;
+    }
+
     // ↓ = enter activity selector (below input, when no other panel active)
-    if (key.downArrow && suggestions.length === 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
+    if (key.downArrow && suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
       const acts = agent.activityLog.getRecent(5);
       if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); return; }
     }
@@ -816,20 +823,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       // ── status ──
       if (line === "/status" || line === "/providers" || line === "/cost" || line === "/version") {
-        const registered = agent.getMulti().getRegistered();
-        const teamRoles = agent.getTeam().getRoles();
-        const usageReport = agent.tracker.formatReport();
-        let text = `Cat's Claw v1.0.0 | Mode: ${mode.toUpperCase()}\n`;
-        text += `Active: ${PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider()} / ${agent.getActiveModel()}\n`;
-        text += `\nProviders (${registered.length}):\n`;
-        text += registered.map((p) => `  ${p.name === agent.getActiveProvider() ? "* " : "  "}${p.name} — ${p.model}`).join("\n");
-        if (mode === "team") {
-          text += `\n\nTeam:\n`;
-          text += teamRoles.map((r) => `  ${r.role.padEnd(10)} ${r.provider}/${r.model}`).join("\n");
-        }
-        text += `\n\nUsage:\n${usageReport}`;
-        text += `\n\nSwitch: /model <provider> [model] | /team (dashboard)`;
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text }]);
+        setStatusPanel(true);
         return;
       }
 
@@ -981,7 +975,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(false);
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion, statusPanel],
   );
 
   const providerLabel = PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider();
@@ -1325,6 +1319,72 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             </Box>
           ))}
           <Text color="gray" italic>  Tab to complete | arrows to navigate</Text>
+        </Box>
+      ) : null}
+
+      {statusPanel ? (
+        <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+          <Text color="#ff9c73" bold>Cat's Claw v1.0.0</Text>
+          <Text color="gray">Mode: <Text bold color={mode === "team" ? "#ff9c73" : "white"}>{mode.toUpperCase()}</Text></Text>
+          <Text color="gray">Active: <Text bold color="white">{agent.getActiveProvider()}/{agent.getActiveModel()}</Text></Text>
+
+          <Box marginTop={1} flexDirection="column">
+            <Text color="#ffb088" bold>Providers</Text>
+            {agent.getMulti().getRegistered().map((p) => {
+              const b = agent.tracker.getBreakdown().find((x) => x.provider === p.name);
+              return (
+                <Box key={p.name}>
+                  <Text color={p.name === agent.getActiveProvider() ? "#ff9c73" : "gray"}>
+                    {p.name === agent.getActiveProvider() ? "  * " : "    "}
+                  </Text>
+                  <Text color={p.name === agent.getActiveProvider() ? "#ff9c73" : "#ffb088"}>{p.name}</Text>
+                  <Text color="gray"> — {p.model}</Text>
+                  {b ? <Text color="gray"> ({b.requests}r, {formatTokens(b.totalTokens)} tok{b.estimatedCost > 0 ? `, $${b.estimatedCost.toFixed(4)}` : ""})</Text> : null}
+                </Box>
+              );
+            })}
+          </Box>
+
+          {mode === "team" ? (
+            <Box marginTop={1} flexDirection="column">
+              <Text color="#ffb088" bold>Team</Text>
+              {agent.getTeam().getRoles().map((r) => (
+                <Box key={r.role}>
+                  <Text color="gray">{"    "}</Text>
+                  <Text color="#cc8866">{r.role.padEnd(10)}</Text>
+                  <Text color="gray">{r.provider}/{r.model}</Text>
+                </Box>
+              ))}
+            </Box>
+          ) : null}
+
+          <Box marginTop={1} flexDirection="column">
+            <Text color="#ffb088" bold>Usage</Text>
+            {agent.tracker.getBreakdown().length === 0 ? (
+              <Text color="gray">{"    No usage yet"}</Text>
+            ) : (
+              agent.tracker.getBreakdown().map((b) => (
+                <Box key={b.key}>
+                  <Text color="gray">{"    "}{b.key}: </Text>
+                  <Text color="white">{formatTokens(b.inputTokens)} in / {formatTokens(b.outputTokens)} out</Text>
+                  <Text color="gray"> / {b.requests} req</Text>
+                  {b.estimatedCost > 0 ? <Text color="yellow"> ~${b.estimatedCost.toFixed(4)}</Text> : <Text color="green"> (free)</Text>}
+                </Box>
+              ))
+            )}
+            {agent.tracker.getBreakdown().length > 0 ? (
+              <Box>
+                <Text color="gray">{"    Total: "}</Text>
+                <Text color="white">{formatTokens(agent.tracker.getTotal().totalTokens)} tok</Text>
+                {agent.tracker.getTotal().estimatedCost > 0 ? <Text color="yellow"> ~${agent.tracker.getTotal().estimatedCost.toFixed(4)}</Text> : null}
+              </Box>
+            ) : null}
+          </Box>
+
+          <Box marginTop={1}>
+            <Text color="gray">MCP: {agent.getMcpStatus().length > 0 ? `${agent.getMcpStatus().length} server(s)` : "off"}</Text>
+          </Box>
+          <Text color="gray" italic>{"  Esc to close"}</Text>
         </Box>
       ) : null}
 
