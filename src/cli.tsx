@@ -101,7 +101,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   });
   const [input, setInput] = useState("");
   const [isBusy, setIsBusy] = useState(false);
-  const [pendingInput, setPendingInput] = useState<string | null>(null);
+  const [pendingQueue, setPendingQueue] = useState<string[]>([]);
   const [cancelRef] = useState({ current: false });
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
   const [turnCount, setTurnCount] = useState(0);
@@ -600,9 +600,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       // ── Normal mode: skip empty; queue if busy ──
       if (!line) return;
       if (isBusy) {
-        setPendingInput(line);
-        // Don't setInput("") — already cleared by Enter key handler
-        setEntries((c) => [...c, { role: "system", text: `Queued: "${line.slice(0, 50)}${line.length > 50 ? "..." : ""}" (will run after current task)` }]);
+        setPendingQueue((q) => [...q, line]);
+        setEntries((c) => [...c, { role: "system", text: `Queued: "${line.slice(0, 50)}${line.length > 50 ? "..." : ""}"` }]);
         return;
       }
 
@@ -1131,14 +1130,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
       } finally {
         setIsBusy(false);
-        if (pendingInput) {
-          const queued = pendingInput;
-          setPendingInput(null);
-          setTimeout(() => submit(queued), 0);
+        if (pendingQueue.length > 0) {
+          const [next, ...rest] = pendingQueue;
+          setPendingQueue(rest);
+          if (next) setTimeout(() => submit(next), 0);
         }
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion, statusPanel, pendingInput],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion, statusPanel, pendingQueue],
   );
 
   const providerLabel = PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider();
@@ -1568,7 +1567,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       <Box borderStyle="round" borderColor="#d97757" paddingX={1}>
         <Text color="#ff9c73" bold>{" > "}</Text>
-        <Text>{input}</Text><Text color="#ff9c73">█</Text>{pendingInput ? <Text color="yellow"> (queued: {pendingInput.slice(0, 30)}...)</Text> : null}
+        <Text>{input}</Text><Text color="#ff9c73">█</Text>{pendingQueue.length > 0 ? <Text color="yellow"> (queued: {pendingQueue.length})</Text> : null}
       </Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
