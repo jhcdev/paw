@@ -18,10 +18,11 @@ export class CodingAgent {
   private readonly cwd: string;
   private mcpReady = false;
   private totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  private detectedProviders?: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[];
   readonly tracker = new UsageTracker();
   readonly activityLog = new ActivityLog();
 
-  constructor(args: { provider: ProviderName; apiKey: string; model: string; cwd: string; baseUrl?: string }) {
+  constructor(args: { provider: ProviderName; apiKey: string; model: string; cwd: string; baseUrl?: string; detected?: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[] }) {
     this.mcpManager = new McpManager();
     this.provider = createProvider(args);
     this.currentProvider = args.provider;
@@ -31,12 +32,13 @@ export class CodingAgent {
     this.multi.register(args.provider, args.apiKey, args.model, args.baseUrl);
     this.team = new TeamRunner(args.cwd);
     this.hooks = new HookManager(args.cwd);
+    this.detectedProviders = args.detected;
   }
 
   async initTeam(): Promise<void> {
     const { config: loadEnv } = await import("dotenv");
     loadEnv({ quiet: true });
-    const detected = await detectProviders(process.env as Record<string, string | undefined>);
+    const detected = this.detectedProviders ?? await detectProviders(process.env as Record<string, string | undefined>);
     // Register all detected providers for multi/team use
     for (const p of detected) {
       if (p.provider !== this.currentProvider) {

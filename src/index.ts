@@ -120,12 +120,14 @@ async function main(): Promise<void> {
   if (args.doLogout) { await logout(args.logoutProvider); return; }
 
   let auth: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string };
+  let detectedForAgent: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[] | undefined;
 
   if (args.provider && args.prompt) {
     // Non-interactive: provider + prompt given, try auto-detect credentials
     const { config: loadEnv } = await import("dotenv");
     loadEnv({ quiet: true });
-    const detected = await (await import("./multi-provider.js")).detectProviders(process.env as Record<string, string | undefined>);
+    const detected = await detectProviders(process.env as Record<string, string | undefined>);
+    detectedForAgent = detected;
     const found = detected.find((d) => d.provider === args.provider);
     if (found) {
       auth = { provider: found.provider, apiKey: found.apiKey, model: args.model ?? found.model, baseUrl: found.baseUrl };
@@ -141,7 +143,8 @@ async function main(): Promise<void> {
     // Auto-detect: try saved credentials / env / login tokens, fallback to Ollama
     const { config: loadEnv } = await import("dotenv");
     loadEnv({ quiet: true });
-    const detected = await (await import("./multi-provider.js")).detectProviders(process.env as Record<string, string | undefined>);
+    const detected = await detectProviders(process.env as Record<string, string | undefined>);
+    detectedForAgent = detected;
 
     if (detected.length > 0) {
       // Pick best available: codex > ollama
@@ -162,9 +165,15 @@ async function main(): Promise<void> {
     model: auth.model,
     cwd: args.cwd,
     baseUrl: auth.baseUrl,
+    detected: detectedForAgent,
   });
 
-  await Promise.all([agent.initMcp(args.cwd), agent.initTeam()]);
+  // Only connect to MCP for non-slash-command prompts (MCP is unnecessary for simple commands)
+  const needsMcp = !args.prompt || !args.prompt.startsWith("/");
+  await Promise.all([
+    needsMcp ? agent.initMcp(args.cwd) : Promise.resolve(),
+    agent.initTeam(),
+  ]);
 
   // Restore session for --continue in one-shot mode
   if (args.doContinue || args.sessionId) {

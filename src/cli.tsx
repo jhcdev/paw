@@ -1,6 +1,7 @@
 import { exec } from "node:child_process";
 import { promises as fsPromises } from "node:fs";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import tty from "node:tty";
 import { promisify } from "node:util";
@@ -13,6 +14,9 @@ import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
 import { formatModelList, getAllFilteredModels, resolveModelByIndex, detectPlan } from "./model-catalog.js";
 import { routeMessage } from "./smart-router.js";
+import { loadSkills, formatSkillList } from "./skills.js";
+import { AutoAgent } from "./auto-agent.js";
+import { PipeAgent } from "./pipe-agent.js";
 
 const execAsync = promisify(exec);
 
@@ -141,20 +145,23 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     agent.activityLog.setOnChange(() => setActivityVersion((v) => v + 1));
   }, [agent]);
 
-  // Save session on every entries change
+  // Save session after 1s of no changes (debounced to avoid I/O on every keystroke)
   React.useEffect(() => {
     if (entries.length <= 1) return;
-    const data: SessionData = {
-      id: sessionId,
-      provider: agent.getActiveProvider(),
-      model: agent.getActiveModel(),
-      mode,
-      cwd: options.cwd,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      entries: entries.map((e) => ({ role: e.role, text: e.text, timestamp: new Date().toISOString() })),
-    };
-    saveSession(data).catch(() => {});
+    const timeout = setTimeout(() => {
+      const data: SessionData = {
+        id: sessionId,
+        provider: agent.getActiveProvider(),
+        model: agent.getActiveModel(),
+        mode,
+        cwd: options.cwd,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        entries: entries.map((e) => ({ role: e.role, text: e.text, timestamp: new Date().toISOString() })),
+      };
+      saveSession(data).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(timeout);
   }, [entries, sessionId]);
 
   const suggestions = useMemo(() => {
@@ -574,15 +581,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       // ── Settings panel submit ──
       if (settingsPanel === "add-key") {
         if (line.trim()) {
-          const { promises: fsp } = await import("node:fs");
-          const p = await import("node:path");
-          const o = await import("node:os");
-          const credPath = p.join(o.homedir(), ".paw", "credentials.json");
+          const credPath = path.join(os.homedir(), ".paw", "credentials.json");
           let creds: Record<string, any> = {};
-          try { creds = JSON.parse(await fsp.readFile(credPath, "utf8")); } catch {}
+          try { creds = JSON.parse(await fsPromises.readFile(credPath, "utf8")); } catch {}
           creds[settingsProvider] = { apiKey: line.trim() };
-          await fsp.mkdir(p.dirname(credPath), { recursive: true });
-          await fsp.writeFile(credPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
+          await fsPromises.mkdir(path.dirname(credPath), { recursive: true });
+          await fsPromises.writeFile(credPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
           const defaults: Record<string, string> = { anthropic: "claude-sonnet-4-20250514", codex: "gpt-5.4", gemini: "gemini-2.5-flash", groq: "openai/gpt-oss-20b", openrouter: "anthropic/claude-sonnet-4" };
           agent.getMulti().register(settingsProvider as any, line.trim(), defaults[settingsProvider] ?? "default");
           setEntries((c) => [...c, { role: "system", text: `${settingsProvider} configured and saved.` }]);
@@ -931,7 +935,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       // ── skills ──
       if (line === "/skills" || line === "/skill") {
-        const { loadSkills, formatSkillList } = await import("./skills.js");
         const skills = await loadSkills(options.cwd);
         setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Skills:\n${formatSkillList(skills)}\n\nUsage: /<skill-name> [context]` }]);
         return;
@@ -961,7 +964,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(true);
 
         try {
-          const { PipeAgent } = await import("./pipe-agent.js");
           const pipe = new PipeAgent(
             options.cwd,
             (prompt) => agent.runTurn(prompt),
@@ -1004,7 +1006,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setIsBusy(true);
 
         try {
-          const { AutoAgent } = await import("./auto-agent.js");
           const auto = new AutoAgent(
             options.cwd,
             (prompt) => agent.runTurn(prompt),
@@ -1041,7 +1042,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (line.startsWith("/")) {
         const skillName = line.slice(1).split(/\s+/)[0]!;
         const skillContext = line.slice(1 + skillName.length).trim();
-        const { loadSkills } = await import("./skills.js");
         const skills = await loadSkills(options.cwd);
         const skill = skills.find((s) => s.name === skillName);
         if (skill) {
@@ -1074,7 +1074,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
         if (route.mode === "auto") {
           setThinkMsg(`auto: ${route.reason}`);
-          const { AutoAgent } = await import("./auto-agent.js");
           const auto = new AutoAgent(options.cwd, (p) => agent.runTurn(p), (step) => {
             const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
             setThinkMsg(`${icon} ${step.description}`);
@@ -1087,14 +1086,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setEntries((c) => [...c, { role: "assistant", text: `[auto: ${result.success ? "DONE" : "INCOMPLETE"} ${(result.totalMs / 1000).toFixed(1)}s]\n${output}` }]);
         } else if (route.mode === "pipe") {
           setThinkMsg(`pipe: ${route.command}`);
-          const { PipeAgent } = await import("./pipe-agent.js");
           const pipe = new PipeAgent(options.cwd, (p) => agent.runTurn(p), (msg) => setThinkMsg(msg));
           const result = route.subMode === "fix" ? await pipe.fix(route.command) : await pipe.analyze(route.command);
           setTurnCount((c) => c + 1);
           const header = result.fixed ? `FIXED (${result.iterations}x)` : result.mode === "analyze" ? "Analyzed" : `${result.iterations}x, not fixed`;
           setEntries((c) => [...c, { role: "assistant", text: `[pipe: ${header} ${(result.totalMs / 1000).toFixed(1)}s]\n${result.analysis}` }]);
         } else if (route.mode === "skill") {
-          const { loadSkills } = await import("./skills.js");
           const skills = await loadSkills(options.cwd);
           const skill = skills.find((s) => s.name === route.skillName);
           if (skill) {
