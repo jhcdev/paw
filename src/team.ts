@@ -215,30 +215,60 @@ export class TeamRunner {
     return null;
   }
 
-  async run(prompt: string, onPhase: (phase: string, provider: string, model: string) => void): Promise<TeamResult> {
+  async run(prompt: string, onPhase: (phase: string, provider: string, model: string) => void, maxRework = 3): Promise<TeamResult> {
     const totalStart = Date.now();
     const phases: PhaseResult[] = [];
 
-    // Phase 1: Plan (sequential — everything depends on this)
+    // Phase 1: Plan
     const plan = await this.runPhase("planner", `User request:\n${prompt}`, onPhase);
     phases.push(plan);
 
-    // Phase 2: Code (sequential — review/test depend on this)
-    const code = await this.runPhase("coder", `Original request:\n${prompt}\n\nPlan:\n${plan.text}`, onPhase);
-    phases.push(code);
+    // Phase 2+3: Code → [Review + Test] loop (up to maxRework iterations)
+    let codeText = "";
+    for (let iteration = 0; iteration < maxRework; iteration++) {
+      const isRework = iteration > 0;
+      const lastReview = phases.filter((p) => p.role === "reviewer").pop()?.text ?? "";
 
-    // Phase 3: Review + Test (PARALLEL — independent of each other)
-    const parallel = await Promise.allSettled([
-      this.runPhase("reviewer", `Original request:\n${prompt}\n\nPlan:\n${plan.text}\n\nImplementation:\n${code.text}`, onPhase),
-      this.runPhase("tester", `Original request:\n${prompt}\n\nImplementation:\n${code.text}`, onPhase),
-    ]);
-    for (const r of parallel) { if (r.status === "fulfilled") phases.push(r.value); }
+      // Code (or rework)
+      const codePrompt = isRework
+        ? `Original request:\n${prompt}\n\nPlan:\n${plan.text}\n\nYour previous implementation had issues.\n\nReviewer feedback:\n${lastReview}\n\nFix the issues and provide the corrected implementation.`
+        : `Original request:\n${prompt}\n\nPlan:\n${plan.text}`;
 
-    // Phase 4: Optimize (sequential — needs all prior context)
-    const reviewText = phases.find((p) => p.role === "reviewer")?.text ?? "";
-    const testText = phases.find((p) => p.role === "tester")?.text ?? "";
+      const label = isRework ? `Reworking (${iteration + 1}/${maxRework})` : ROLE_LABELS.coder;
+      const coder = this.agents.get("coder")!;
+      onPhase(label, coder.provider, coder.model);
+      const code = await this.runPhase("coder", codePrompt, onPhase);
+      phases.push(code);
+      codeText = code.text;
+
+      // Review + Test (PARALLEL)
+      const parallel = await Promise.allSettled([
+        this.runPhase("reviewer", `Original request:\n${prompt}\n\nPlan:\n${plan.text}\n\nImplementation (iteration ${iteration + 1}):\n${codeText}\n\nIf the code is good, include PASS in your response. If it needs changes, rate MAJOR or MINOR.`, onPhase),
+        this.runPhase("tester", `Original request:\n${prompt}\n\nImplementation:\n${codeText}`, onPhase),
+      ]);
+      for (const r of parallel) { if (r.status === "fulfilled") phases.push(r.value); }
+
+      // Check if reviewer passed
+      const review = phases.filter((p) => p.role === "reviewer").pop();
+      if (review) {
+        const upper = review.text.toUpperCase();
+        if (upper.includes("PASS") || upper.includes("MINOR")) {
+          break; // Approved — exit loop
+        }
+        // MAJOR → continue loop for rework
+        if (iteration < maxRework - 1) {
+          onPhase("Review: MAJOR → rework", "", "");
+        }
+      } else {
+        break; // No review = skip loop
+      }
+    }
+
+    // Phase 4: Optimize (after approval)
+    const reviewText = phases.filter((p) => p.role === "reviewer").pop()?.text ?? "";
+    const testText = phases.filter((p) => p.role === "tester").pop()?.text ?? "";
     const opt = await this.runPhase("optimizer",
-      `Original request:\n${prompt}\n\nImplementation:\n${code.text}\n\nReview:\n${reviewText || "(none)"}\n\nTests:\n${testText || "(none)"}`,
+      `Original request:\n${prompt}\n\nFinal Implementation:\n${codeText}\n\nReview:\n${reviewText || "(none)"}\n\nTests:\n${testText || "(none)"}`,
       onPhase,
     );
     phases.push(opt);
