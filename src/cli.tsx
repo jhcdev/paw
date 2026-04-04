@@ -77,7 +77,6 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/session", desc: "current session ID" },
   { name: "/skills", desc: "list available skills" },
   { name: "/hooks", desc: "list configured hooks" },
-  { name: "/activity", desc: "show activity log" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
 ];
@@ -614,7 +613,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /doctor    - diagnostics",
             "  /skills   - list available skills",
             "  /hooks    - list configured hooks",
-            "  /activity  - show activity log",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -942,46 +940,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── activity ──
-      if (line === "/activity" || line.startsWith("/activity ")) {
-        const arg = line.slice("/activity".length).trim();
-        const activities = agent.activityLog.getRecent(20);
-
-        if (arg) {
-          // View specific activity by number
-          const num = parseInt(arg, 10);
-          const act = activities[num - 1];
-          if (act) {
-            let detail = `Activity: ${act.name} (${act.status})\n`;
-            detail += `Duration: ${act.finishedAt ? ((act.finishedAt - act.startedAt) / 1000).toFixed(1) + "s" : "running"}\n`;
-            if (act.logs.length > 0) {
-              detail += `\nLogs (${act.logs.length}):\n`;
-              for (const log of act.logs) {
-                const icon = log.type === "prompt" ? "→" : log.type === "response" ? "←" : log.type === "error" ? "✗" : "·";
-                const preview = log.content.length > 200 ? log.content.slice(0, 200) + "..." : log.content;
-                detail += `  ${icon} [${log.type}] ${preview}\n`;
-              }
-            }
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: detail }]);
-          } else {
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Activity #${arg} not found. Use /activity to see list.` }]);
-          }
-        } else {
-          // List activities
-          if (activities.length === 0) {
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No activities recorded." }]);
-          } else {
-            const log = activities.map((a, i) => {
-              const dur = a.finishedAt ? `${((a.finishedAt - a.startedAt) / 1000).toFixed(1)}s` : "running";
-              const icon = a.status === "done" ? "✓" : a.status === "error" ? "✗" : "◉";
-              const logs = a.logs.length > 0 ? ` [${a.logs.length} logs]` : "";
-              return `  ${i + 1}. ${icon} ${a.name} (${dur})${logs}${a.detail ? ` — ${a.detail.slice(0, 60)}` : ""}`;
-            }).join("\n");
-            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Activity Log:\n${log}\n\nView details: /activity <number>` }]);
-          }
-        }
-        return;
-      }
 
       // ── unknown command / skill ──
       if (line.startsWith("/")) {
