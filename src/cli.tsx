@@ -77,6 +77,7 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/session", desc: "current session ID" },
   { name: "/skills", desc: "list available skills" },
   { name: "/hooks", desc: "list configured hooks" },
+  { name: "/activity", desc: "show activity log" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
 ];
@@ -113,6 +114,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [modelPanelModels, setModelPanelModels] = useState<{ id: string; name: string }[]>([]);
   const [modelCursor, setModelCursor] = useState(0);
   const [providerVersion, setProviderVersion] = useState(0);
+  const [activityVersion, setActivityVersion] = useState(0);
 
   // Raw stdin handler for smooth character input (especially Korean IME)
   const { stdin } = useStdin();
@@ -143,6 +145,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     });
     return unwatch;
   }, [sessionId]);
+
+  // Listen for activity log changes
+  React.useEffect(() => {
+    agent.activityLog.setOnChange(() => setActivityVersion((v) => v + 1));
+  }, [agent]);
 
   // Save session on every entries change
   React.useEffect(() => {
@@ -566,6 +573,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /doctor    - diagnostics",
             "  /skills   - list available skills",
             "  /hooks    - list configured hooks",
+            "  /activity  - show activity log",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -893,6 +901,22 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+      // ── activity ──
+      if (line === "/activity") {
+        const activities = agent.activityLog.getRecent(20);
+        if (activities.length === 0) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No activities recorded." }]);
+        } else {
+          const log = activities.map((a) => {
+            const dur = a.finishedAt ? `${((a.finishedAt - a.startedAt) / 1000).toFixed(1)}s` : "running";
+            const icon = a.status === "done" ? "✓" : a.status === "error" ? "✗" : "◉";
+            return `  ${icon} ${a.name} (${dur})${a.detail ? ` — ${a.detail.slice(0, 80)}` : ""}`;
+          }).join("\n");
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Activity Log:\n${log}` }]);
+        }
+        return;
+      }
+
       // ── unknown command / skill ──
       if (line.startsWith("/")) {
         const skillName = line.slice(1).split(/\s+/)[0]!;
@@ -926,9 +950,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       try {
         if (mode === "team" && agent.getTeam().isReady()) {
+          let currentPhaseId: string | null = null;
           const result = await agent.getTeam().run(line, (phase, provider, model) => {
+            if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
+            currentPhaseId = agent.activityLog.start("agent", `${phase}`, `${provider}/${model}`);
             setThinkMsg(`${phase} (${provider}/${model})...`);
           });
+          if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
           const output = result.phases.map((p) =>
             `--- ${p.role.toUpperCase()} (${p.provider}/${p.model}, ${p.ms}ms) ---\n${p.text}`
           ).join("\n\n") + `\n\nTotal: ${result.totalMs}ms`;
@@ -1273,6 +1301,27 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               <Text color="#cc8866">Args (space-separated, e.g. -y @modelcontextprotocol/server-github):</Text>
             </Box>
           ) : null}
+        </Box>
+      ) : null}
+
+      {/* Activity Log */}
+      {agent.activityLog.getRecent(5).length > 0 ? (
+        <Box flexDirection="column" paddingX={2} marginBottom={0}>
+          {agent.activityLog.getRecent(5).map((act) => (
+            <Box key={act.id} flexDirection="row">
+              <Text color={act.status === "running" ? "yellow" : act.status === "done" ? "green" : "red"}>
+                {act.status === "running" ? "◉ " : act.status === "done" ? "✓ " : "✗ "}
+              </Text>
+              <Text color="gray">
+                {act.name}
+                {act.status === "running" ? "..." : ""}
+                {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : ""}
+              </Text>
+              {act.detail && act.status !== "running" ? (
+                <Text color="gray" dimColor> — {act.detail.slice(0, 60)}</Text>
+              ) : null}
+            </Box>
+          ))}
         </Box>
       ) : null}
 
