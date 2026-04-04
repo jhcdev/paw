@@ -12,6 +12,7 @@ import { appendToSession, saveSession, listSessions, watchSession, type SessionD
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
 import { formatModelList, getAllFilteredModels, resolveModelByIndex, detectPlan } from "./model-catalog.js";
+import { routeMessage } from "./smart-router.js";
 
 const execAsync = promisify(exec);
 
@@ -1039,17 +1040,58 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── normal message ──
+      // ── normal message (smart routing) ──
       setEntries((c) => [...c, { role: "user", text: line }]);
       setIsBusy(true);
 
       try {
-        if (mode === "team" && agent.getTeam().isReady()) {
+        const hasMulti = agent.getMulti().getRegistered().length > 1;
+        const route = routeMessage(line, mode === "team", hasMulti);
+
+        if (route.mode === "auto") {
+          setThinkMsg(`auto: ${route.reason}`);
+          const { AutoAgent } = await import("./auto-agent.js");
+          const auto = new AutoAgent(options.cwd, (p) => agent.runTurn(p), (step) => {
+            const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
+            setThinkMsg(`${icon} ${step.description}`);
+          });
+          const result = await auto.run(line);
+          setTurnCount((c) => c + 1);
+          const output = result.steps
+            .filter((s) => s.action === "done" && s.result)
+            .map((s) => s.result).join("\n") || result.summary;
+          setEntries((c) => [...c, { role: "assistant", text: `[auto: ${result.success ? "DONE" : "INCOMPLETE"} ${(result.totalMs / 1000).toFixed(1)}s]\n${output}` }]);
+        } else if (route.mode === "pipe") {
+          setThinkMsg(`pipe: ${route.command}`);
+          const { PipeAgent } = await import("./pipe-agent.js");
+          const pipe = new PipeAgent(options.cwd, (p) => agent.runTurn(p), (msg) => setThinkMsg(msg));
+          const result = route.subMode === "fix" ? await pipe.fix(route.command) : await pipe.analyze(route.command);
+          setTurnCount((c) => c + 1);
+          const header = result.fixed ? `FIXED (${result.iterations}x)` : result.mode === "analyze" ? "Analyzed" : `${result.iterations}x, not fixed`;
+          setEntries((c) => [...c, { role: "assistant", text: `[pipe: ${header} ${(result.totalMs / 1000).toFixed(1)}s]\n${result.analysis}` }]);
+        } else if (route.mode === "skill") {
+          const { loadSkills } = await import("./skills.js");
+          const skills = await loadSkills(options.cwd);
+          const skill = skills.find((s) => s.name === route.skillName);
+          if (skill) {
+            setThinkMsg(`skill: /${route.skillName}`);
+            const fullPrompt = `${skill.prompt}\n\nContext:\n${route.context}`;
+            const result = await agent.runTurn(fullPrompt);
+            setTurnCount((c) => c + 1);
+            setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty)" }]);
+          } else {
+            // Skill not found, fall through to solo
+            setThinkMsg(randomCatMood());
+            const result = await agent.runTurn(line);
+            setTurnCount((c) => c + 1);
+            setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty)" }]);
+          }
+        } else if (route.mode === "team" && agent.getTeam().isReady()) {
           let currentPhaseId: string | null = null;
-          const result = await agent.getTeam().run(line, (phase, provider, model) => {
+          const result = await agent.getTeam().run(line, (phase, provider, mdl) => {
             if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
-            currentPhaseId = agent.activityLog.start("agent", `${phase}`, `${provider}/${model}`);
-            setThinkMsg(`${phase} (${provider}/${model})...`);
+            currentPhaseId = agent.activityLog.start("agent", `${phase}`, `${provider}/${mdl}`);
+            setThinkMsg(`${phase} (${provider}/${mdl})...`);
           });
           if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
           const output = result.phases.map((p) =>
@@ -1058,6 +1100,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setTurnCount((c) => c + 1);
           setEntries((c) => [...c, { role: "assistant", text: output }]);
         } else {
+          // Solo mode
           setThinkMsg(randomCatMood());
           const result = await agent.runTurn(line);
           setTurnCount((c) => c + 1);
