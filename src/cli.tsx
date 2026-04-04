@@ -97,6 +97,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   });
   const [input, setInput] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const [pendingInput, setPendingInput] = useState<string | null>(null);
+  const [cancelRef] = useState({ current: false });
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
   const [turnCount, setTurnCount] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -156,10 +158,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   }, [entries, sessionId]);
 
   const suggestions = useMemo(() => {
-    if (!input.startsWith("/") || input.includes(" ") || isBusy) return [];
+    if (!input.startsWith("/") || input.includes(" ")) return [];
     const q = input.toLowerCase();
     return COMMANDS.filter((c) => c.name.startsWith(q));
-  }, [input, isBusy]);
+  }, [input]);
 
   useInput((ch, key) => {
     if (key.ctrl && ch === "c") exit();
@@ -438,7 +440,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
 
-    if (key.escape && !isBusy) exit();
+    if (key.escape) {
+      if (isBusy) {
+        cancelRef.current = true;
+        setEntries((c) => [...c, { role: "system", text: "Cancelling..." }]);
+        setIsBusy(false);
+        return;
+      }
+      exit();
+    }
 
     if (suggestions.length > 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
       if (key.downArrow) {
@@ -468,7 +478,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // Enter to submit (no autocomplete active)
-    if (key.return && !isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
+    if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
       const value = input;
       setInput("");
       submit(value);
@@ -575,8 +585,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── Normal mode: skip empty/busy ──
-      if (!line || isBusy) return;
+      // ── Normal mode: skip empty; queue if busy ──
+      if (!line) return;
+      if (isBusy) {
+        setPendingInput(line);
+        setInput("");
+        setEntries((c) => [...c, { role: "system", text: `Queued: "${line.slice(0, 50)}${line.length > 50 ? "..." : ""}" (will run after current task)` }]);
+        return;
+      }
 
       // ── exit ──
       if (line === "/exit" || line === "/quit") { exit(); return; }
@@ -1110,9 +1126,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
       } finally {
         setIsBusy(false);
+        if (pendingInput) {
+          const queued = pendingInput;
+          setPendingInput(null);
+          setTimeout(() => submit(queued), 0);
+        }
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion, statusPanel],
+    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion, statusPanel, pendingInput],
   );
 
   const providerLabel = PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider();
@@ -1166,10 +1187,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       </Box>
 
       {isBusy ? (
-        <Box>
-          <Text color="#ff9c73" bold>{"=^.^= "}</Text>
-          <Text color="gray" italic>{thinkMsg}</Text>
-          <Newline />
+        <Box flexDirection="column">
+          <Box>
+            <Text color="#ff9c73" bold>{"=^.^= "}</Text>
+            <Text color="gray" italic>{thinkMsg}</Text>
+          </Box>
+          <Text color="gray" italic>  Esc to cancel</Text>
         </Box>
       ) : null}
 
@@ -1540,7 +1563,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       <Box borderStyle="round" borderColor="#d97757" paddingX={1}>
         <Text color="#ff9c73" bold>{" > "}</Text>
-        <Text>{input}</Text><Text color="#ff9c73">█</Text>
+        <Text>{input}</Text><Text color="#ff9c73">█</Text>{pendingInput ? <Text color="yellow"> (queued: {pendingInput.slice(0, 30)}...)</Text> : null}
       </Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
