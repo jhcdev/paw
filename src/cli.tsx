@@ -1335,7 +1335,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
         <Text color={mode === "team" ? "#ff9c73" : "gray"}>{mode === "team" ? "TEAM" : providerLabel}/{agent.getActiveModel()}</Text>
-        <Text color="gray">turns: {turnCount}</Text>
+        <Text color="gray">{(() => {
+          const breakdown = agent.tracker.getBreakdown();
+          if (breakdown.length === 0) return `reqs: 0`;
+          return breakdown.map((b) => `${b.provider}:${b.requests}`).join(" ");
+        })()}</Text>
         <Text color={agent.getMcpStatus().length > 0 ? "green" : "gray"}>
           mcp: {agent.getMcpStatus().length > 0 ? `${agent.getMcpStatus().length} server(s)` : "off"}
         </Text>
