@@ -158,6 +158,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   useInput((ch, key) => {
     if (key.ctrl && ch === "c") exit();
 
+    // ↑ with empty input = enter activity selector
+    if (key.upArrow && input === "" && !isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
+      const acts = agent.activityLog.getRecent(5);
+      if (acts.length > 0) { setActivityCursor(acts.length - 1); setActivityView("__select__"); return; }
+    }
+
     // Ctrl+L = clear
     if (key.ctrl && ch === "l" && !isBusy && mcpMode === "off") {
       agent.clear();
@@ -470,11 +476,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
     // Regular character input (including Korean/CJK)
     if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
-      // "!" with empty input → open activity viewer
-      if (ch === "!" && input === "") {
-        const acts = agent.activityLog.getRecent(5);
-        if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); return; }
-      }
       setInput((prev) => {
         const next = prev + ch;
         if (next.startsWith("/")) setSelectedIdx(0);
@@ -1356,7 +1357,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           {activityView === "__select__" ? (
             <Text color="gray" italic>  ↑↓ select  Enter view  Esc back</Text>
           ) : (
-            <Text color="gray" italic>  ! to inspect</Text>
+            <Text color="gray" italic>  ↑ to inspect</Text>
           )}
         </Box>
       ) : null}
