@@ -8,7 +8,7 @@
 
 Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, session sync, skills, hooks, and automatic fallback.
 
-> **Disclaimer:** Paw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by OpenAI or any AI provider. Codex, GPT, and related names are trademarks of their respective owners.
+> **Disclaimer:** Paw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI or any AI provider. Claude, Codex, GPT, and related names are trademarks of their respective owners.
 
 ## Architecture
 
@@ -22,6 +22,7 @@ Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support,
                                          │
                                    ┌─────┴─────┐
                                    │ Auto-Detect│
+                                   │ Anthropic  │
                                    │  Codex CLI │
                                    │  Ollama    │
                                    └─────┬─────┘
@@ -74,14 +75,14 @@ Provider Call → Success → Response
 ```
 Plan(sequential) → Code(sequential) → [Review + Test](parallel) → Optimize(sequential)
 
-Example:  codex     → planner, coder (score: 9)
+Example:  anthropic → planner, reviewer, optimizer
+          codex     → coder (score: 9)
           ollama    → tester (unique spread)
-          codex     → reviewer, optimizer
 ```
 
 ## Features
 
-- **2 Providers** — Codex (CLI), Ollama (local)
+- **3 Providers** — Anthropic (API), Codex (CLI), Ollama (local)
 - **Auto-detect** — No login prompt; finds Codex CLI and Ollama automatically
 - **Solo/Team mode** — Single provider or 5-agent pipeline in one terminal
 - **Session sync** — Conversations persist and sync across terminals in real-time (fs.watch)
@@ -102,7 +103,7 @@ Example:  codex     → planner, coder (score: 9)
 
 - Node.js 22+
 - npm
-- At least one: Codex CLI or Ollama
+- At least one: Anthropic API key, Codex CLI, or Ollama
 
 ## Installation
 
@@ -130,8 +131,23 @@ paw --session abc123               # Join specific session
 
 | Provider | Auth | How it works |
 |----------|------|-------------|
+| **Anthropic** | API key (`ANTHROPIC_API_KEY`) | Claude models, best reasoning |
 | **Codex** | `codex login` | Runs `codex exec` with ChatGPT subscription |
 | **Ollama** | (none) | Connects to local Ollama server |
+
+### Anthropic
+
+API key from [console.anthropic.com](https://console.anthropic.com). Best for reasoning and planning.
+
+```bash
+# Set in .env
+ANTHROPIC_API_KEY=sk-ant-api03-...
+# Or configure in REPL
+/settings → Anthropic → enter API key
+```
+
+Models: Haiku 4.5 (fast), Sonnet 4/4.6 (balanced), Opus 4/4.6 (powerful).
+Pricing: per-token (e.g. Sonnet $3/1M input, $15/1M output).
 
 ### Codex
 
@@ -302,7 +318,8 @@ Manage providers via arrow-key panel:
 
 ```
 ╭─ Provider Settings ──────────────────╮
-│  > ● Codex (active)                  │
+│  > ● Anthropic (active)              │
+│    ● Codex                           │
 │    ● Ollama (local)                  │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
@@ -318,7 +335,8 @@ Arrow-key panel showing plan-filtered models. Ollama shows actually pulled model
 ╭─ Model Selection ────────────────────╮
 │ Active: codex/gpt-5.4                │
 │ Select provider:                     │
-│  > codex                             │
+│  > anthropic                         │
+│    codex                             │
 │    ollama                            │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
@@ -327,6 +345,15 @@ Arrow-key panel showing plan-filtered models. Ollama shows actually pulled model
 │  > gpt-5.4 — GPT-5.4                │
 │    gpt-5.4-mini — GPT-5.4 Mini      │
 │    o4-mini — o4 Mini                 │
+│  ↑↓ navigate  Enter select  Esc back │
+╰──────────────────────────────────────╯
+         ↓ Enter (Anthropic)
+╭─ Select model ───────────────────────╮
+│  > claude-haiku-4-5 — Haiku 4.5     │
+│    claude-sonnet-4 — Sonnet 4        │
+│    claude-sonnet-4-6 — Sonnet 4.6    │
+│    claude-opus-4 — Opus 4            │
+│    claude-opus-4-6 — Opus 4.6        │
 │  ↑↓ navigate  Enter select  Esc back │
 ╰──────────────────────────────────────╯
          ↓ Enter (Codex)
@@ -486,7 +513,7 @@ Supports stdio, HTTP, SSE. Tools auto-injected into all providers. Failed connec
 ### Status Bar
 
 ```
-Codex/gpt-5.4              turns: 5  mcp: 1 server(s)  tokens: 4.2k
+anthropic:2r 1.5k $0.003  codex:5r  ollama:3r 8.2k  mcp: 1
 TEAM/gpt-5.4               turns: 2  mcp: off           local
 ```
 
@@ -622,6 +649,7 @@ you  analyze this codebase
 13. **Anthropic removed** — Moved to separate plugin [jhcdev/paw-anthropic](https://github.com/jhcdev/paw-anthropic)
 14. **Skills system** — 7 built-in skills + user/project custom skills via JSON files
 15. **Hooks system** — Event-driven automation with 7 lifecycle events and shell command execution
+16. **Anthropic provider** — API key mode with per-token pricing
 
 ## License
 
