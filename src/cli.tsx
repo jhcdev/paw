@@ -1355,9 +1355,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       })() : null}
 
       {/* Activity Log — selector or inline list */}
-      {!activityView && agent.activityLog.getRecent(5).length > 0 ? (
+      {!activityView && agent.activityLog.getRunning().length > 0 ? (
         <Box flexDirection="column" paddingX={2} marginBottom={0}>
-          {agent.activityLog.getRecent(5).map((act, i) => (
+          {agent.activityLog.getRunning().map((act, i) => (
             <Box key={act.id} flexDirection="row">
               <Text color={activityView === "__select__" && i === activityCursor ? "#ff9c73" : (act.status === "running" ? "yellow" : act.status === "done" ? "green" : "red")} bold={activityView === "__select__" && i === activityCursor}>
                 {activityView === "__select__" && i === activityCursor ? "> " : "  "}
