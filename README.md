@@ -6,7 +6,7 @@
   > ^ <
 ```
 
-Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, session sync, skills, hooks, and automatic fallback.
+Multi-provider AI coding agent for the terminal. Smart routing, solo or team mode, MCP support, session sync, skills, hooks, and automatic fallback.
 
 ![Paw Terminal](assets/screenshot.png)
 
@@ -102,6 +102,7 @@ Example:  anthropic → planner, reviewer, optimizer
 - **Security hardened** — Injection protection, SSRF blocking, symlink guards
 - **`/auto` mode** — Autonomous agent: plan → execute → verify → fix loop until done
 - **`/pipe` mode** — Feed shell output to AI: analyze, auto-fix errors, or watch commands
+- **Smart Router** — Auto-detects best mode from your message (EN/KO/JA/ZH)
 
 ## Requirements
 
@@ -498,6 +499,24 @@ Pass — no errors
 FIXED after 3 iteration(s) (18.2s)
 ```
 
+### Smart Router — Auto Mode Selection
+
+No need to remember commands. Just type naturally — Paw picks the best execution mode automatically.
+
+| You type | Paw routes to | Why |
+|----------|--------------|-----|
+| `npm test` | `/pipe` | Shell command detected |
+| `implement JWT auth` | `/auto` | Complex implementation task |
+| `review this code` | `/review` skill | Code review pattern |
+| `이 코드 리뷰해줘` | `/review` skill | Korean skill match |
+| `모든 에러 수정해줘` | `/auto` | Korean auto task |
+| `tsc --noEmit` | `/pipe` | Shell command |
+| `hello` | solo | Simple message |
+
+Supports: English, Korean, Japanese, Chinese.
+CJK-aware (shorter messages still trigger correctly).
+Disable with explicit `/` commands to override routing.
+
 ## Tools (8 built-in)
 
 | Tool | Description |
@@ -717,6 +736,7 @@ you  analyze this codebase
 16. **Anthropic provider** — API key mode with per-token pricing
 17. **`/auto` mode** — Autonomous plan→execute→verify→fix agent loop
 18. **`/pipe` mode** — Shell output → AI analysis/fix/watch
+19. **Smart Router** — Auto-detect best mode from message content (multilingual)
 
 ## License
 
