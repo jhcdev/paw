@@ -5,7 +5,7 @@ import path from "node:path";
 import tty from "node:tty";
 import { promisify } from "node:util";
 import React, { useCallback, useMemo, useState } from "react";
-import { Box, Newline, render, Text, useApp, useInput, useStdin } from "ink";
+import { Box, Newline, render, Text, useApp, useInput } from "ink";
 
 import type { CodingAgent } from "./agent.js";
 import { appendToSession, saveSession, listSessions, watchSession, type SessionData, type SessionEntry } from "./session.js";
@@ -118,33 +118,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [activityCursor, setActivityCursor] = useState(0);
   const [activityScroll, setActivityScroll] = useState(0);
 
-  // Raw stdin handler for smooth character input (especially Korean IME)
-  const { stdin } = useStdin();
-  React.useEffect(() => {
-    if (!stdin) return;
-    const handler = (data: Buffer) => {
-      const s = data.toString("utf8");
-      // Skip control characters handled by useInput (arrows, escape, ctrl+*, etc.)
-      if (s === "\r" || s === "\n") return; // Enter — handled by useInput
-      if (s === "\x7f" || s === "\b") return; // Backspace — handled by useInput
-      // Ctrl+A (char code 1) — open activity viewer
-      if (s.charCodeAt(0) === 1) {
-        const acts = agent.activityLog.getRecent(5);
-        if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); }
-        return;
-      }
-      if (s.charCodeAt(0) < 32 && s.charCodeAt(0) !== 9) return; // Other control chars
-      if (s.startsWith("\x1b")) return; // Escape sequences (arrows etc.)
-      // Regular text input
-      setInput((prev) => {
-        const next = prev + s;
-        if (next.startsWith("/")) setSelectedIdx(0);
-        return next;
-      });
-    };
-    stdin.on("data", handler);
-    return () => { stdin.off("data", handler); };
-  }, [stdin]);
+  // All input handled in useInput below (no separate useStdin)
 
   // Watch session file for changes from other terminals
   React.useEffect(() => {
@@ -219,17 +193,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
 
-    // Activity list selection (when activities visible and no other panel open)
-    if (!isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
-      const recentActs = agent.activityLog.getRecent(5);
-      if (recentActs.length > 0 && key.ctrl && ch === "a") {
-        // Ctrl+A = enter activity selector
-        setActivityCursor(0);
-        const acts = agent.activityLog.getRecent(5);
-        if (acts.length > 0) setActivityView("__select__");
-        return;
-      }
-    }
 
     // Activity selector mode
     if (activityView === "__select__") {
@@ -503,6 +466,22 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return chars.join("");
       });
       return;
+    }
+
+    // Ctrl+A — open activity viewer
+    if (key.ctrl && ch === "a") {
+      const acts = agent.activityLog.getRecent(5);
+      if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); }
+      return;
+    }
+
+    // Regular character input (including Korean/CJK)
+    if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
+      setInput((prev) => {
+        const next = prev + ch;
+        if (next.startsWith("/")) setSelectedIdx(0);
+        return next;
+      });
     }
   });
 
