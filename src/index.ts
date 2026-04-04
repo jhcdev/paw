@@ -278,6 +278,20 @@ async function main(): Promise<void> {
         const result = await agent.getMulti().ask(target, askPrompt);
         process.stdout.write(`[${target}] ${result.text}\n`);
       }
+    } else if (args.prompt.startsWith("/auto ")) {
+      const autoGoal = args.prompt.slice(6).trim();
+      const { AutoAgent } = await import("./auto-agent.js");
+      const auto = new AutoAgent(
+        args.cwd,
+        (prompt) => agent.runTurn(prompt),
+        (step) => {
+          const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
+          process.stdout.write(`${pc.gray(`${icon} ${step.description}`)}\n`);
+        },
+      );
+      const result = await auto.run(autoGoal);
+      process.stdout.write(`\n${result.success ? "COMPLETED" : "INCOMPLETE"} (${(result.totalMs / 1000).toFixed(1)}s)\n`);
+      process.stdout.write(`${result.summary}\n`);
     } else {
       const result = await agent.runTurn(args.prompt);
       process.stdout.write(`${result.text}\n`);

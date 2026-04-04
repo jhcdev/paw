@@ -81,6 +81,7 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/hooks", desc: "list configured hooks" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
+  { name: "/auto", desc: "autonomous agent mode" },
 ];
 
 function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions }) {
@@ -605,6 +606,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /doctor    - diagnostics",
             "  /skills   - list available skills",
             "  /hooks    - list configured hooks",
+            "  /auto <task> - autonomous agent (plan→execute→verify→fix loop)",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -919,6 +921,50 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+
+      // ── auto ──
+      if (line.startsWith("/auto ")) {
+        const autoGoal = line.slice(6).trim();
+        if (!autoGoal) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /auto <task>\nExample: /auto add input validation to the login form" }]);
+          return;
+        }
+        setEntries((c) => [...c, { role: "user", text: line }]);
+        setIsBusy(true);
+
+        try {
+          const { AutoAgent } = await import("./auto-agent.js");
+          const auto = new AutoAgent(
+            options.cwd,
+            (prompt) => agent.runTurn(prompt),
+            (step) => {
+              const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
+              setThinkMsg(`${icon} ${step.description}`);
+            },
+          );
+
+          const result = await auto.run(autoGoal);
+
+          // Build output
+          const lines: string[] = [`Auto: ${result.success ? "COMPLETED" : "INCOMPLETE"} (${(result.totalMs / 1000).toFixed(1)}s)\n`];
+          for (const step of result.steps) {
+            const icon = step.status === "success" ? "✓" : step.status === "fail" ? "✗" : "◉";
+            const dur = step.ms ? ` (${(step.ms / 1000).toFixed(1)}s)` : "";
+            lines.push(`${icon} ${step.action}: ${step.description}${dur}`);
+            if (step.result && step.action === "done") {
+              lines.push(step.result);
+            }
+          }
+
+          setTurnCount((c) => c + 1);
+          setEntries((c) => [...c, { role: "assistant", text: lines.join("\n") }]);
+        } catch (error) {
+          setEntries((c) => [...c, { role: "system", text: `Auto failed: ${error instanceof Error ? error.message : String(error)}` }]);
+        } finally {
+          setIsBusy(false);
+        }
+        return;
+      }
 
       // ── unknown command / skill ──
       if (line.startsWith("/")) {
