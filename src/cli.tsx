@@ -101,8 +101,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   });
   const [input, setInput] = useState("");
   const [isBusy, setIsBusy] = useState(false);
-  const pendingRef = React.useRef<string | null>(null);
+  const busyRef = React.useRef(false);
+  const pendingRef = React.useRef<string[]>([]);
   const lastEnterRef = React.useRef(0);
+  const inputRef = React.useRef("");
   const [cancelRef] = useState({ current: false });
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
   const [turnCount, setTurnCount] = useState(0);
@@ -134,8 +136,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   // All input handled in useInput below (no separate useStdin)
 
   // Watch session file for changes from other terminals
+  const lastSaveRef = React.useRef(0);
   React.useEffect(() => {
     const unwatch = watchSession(sessionId, (data) => {
+      // Ignore our own writes (within 2s of last save)
+      if (Date.now() - lastSaveRef.current < 2000) return;
       setEntries(data.entries.map((e) => ({ role: e.role, text: e.text })));
     });
     return unwatch;
@@ -160,6 +165,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         updatedAt: new Date().toISOString(),
         entries: entries.map((e) => ({ role: e.role, text: e.text, timestamp: new Date().toISOString() })),
       };
+      lastSaveRef.current = Date.now();
       saveSession(data).catch(() => {});
     }, 1000);
     return () => clearTimeout(timeout);
@@ -493,13 +499,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
     }
 
-    // Enter to submit (debounce 150ms to prevent IME double-fire)
+    // Enter to submit (inputRef synced synchronously — IME double-fire sees empty ref and exits)
     if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
-      const now = Date.now();
-      if (now - lastEnterRef.current < 150) return; // IME double-enter guard
-      lastEnterRef.current = now;
-      const value = input;
+      const value = inputRef.current;
       if (!value.trim()) return;
+      inputRef.current = "";
       setInput("");
       submit(value);
       return;
@@ -510,7 +514,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       setInput((prev) => {
         const chars = [...prev];
         chars.pop();
-        return chars.join("");
+        const val = chars.join("");
+        inputRef.current = val;
+        return val;
       });
       return;
     }
@@ -519,6 +525,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
       setInput((prev) => {
         const next = prev + ch;
+        inputRef.current = next;
         if (next.startsWith("/")) setSelectedIdx(0);
         return next;
       });
@@ -538,7 +545,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   );
 
   const submit = useCallback(
-    async (value: string) => {
+    async (value: string, skipRender = false) => {
       const line = value.trim();
       setInput("");
 
@@ -602,22 +609,25 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── Normal mode: skip empty; queue if busy ──
+      // ── Normal mode: skip empty ──
       if (!line) return;
-      if (isBusy) {
-        pendingRef.current = line; // Only keep latest (not array — prevents buildup)
-        setEntries((c) => [...c, { role: "system", text: `Queued: "${line.slice(0, 50)}"` }]);
-        return;
-      }
 
-      // ── exit ──
+      // ── exit (always immediate) ──
       if (line === "/exit" || line === "/quit") { exit(); return; }
 
-      // ── clear ──
+      // ── clear (always immediate, also cancels queue) ──
       if (line === "/clear") {
         agent.clear();
         setTurnCount(0);
+        pendingRef.current = [];
         setEntries([{ role: "system", text: "Conversation cleared." }]);
+        return;
+      }
+
+      // ── queue if busy ──
+      if (busyRef.current) {
+        pendingRef.current.push(line);
+        setEntries((c) => [...c, { role: "user", text: line }]);
         return;
       }
 
@@ -1069,7 +1079,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       // ── normal message (smart routing) ──
-      setEntries((c) => [...c, { role: "user", text: line }]);
+      if (!skipRender) setEntries((c) => [...c, { role: "user", text: line }]);
+      busyRef.current = true;
       setIsBusy(true);
 
       try {
@@ -1134,14 +1145,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       } catch (error) {
         setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
       } finally {
+        busyRef.current = false;
         setIsBusy(false);
-        // Process one queued message
-        const next = pendingRef.current;
-        pendingRef.current = null;
-        if (next?.trim()) {
-          // Small delay to let React update isBusy=false first
-          await new Promise((r) => setTimeout(r, 10));
-          await submit(next.trim());
+        // Process queued messages one by one
+        if (pendingRef.current.length > 0) {
+          const next = pendingRef.current.shift()!;
+          if (next.trim()) {
+            await new Promise((r) => setTimeout(r, 10));
+            await submit(next.trim(), true);
+          }
         }
       }
     },
