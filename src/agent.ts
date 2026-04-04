@@ -85,12 +85,14 @@ export class CodingAgent {
   async runTurn(prompt: string): Promise<AgentTurnResult> {
     await this.hooks.run("pre-turn", { prompt }).catch(() => {});
     const actId = this.activityLog.start("agent", "thinking", prompt.slice(0, 50));
+    this.activityLog.log(actId, "prompt", prompt);
     try {
       const result = await this.provider.runTurn(prompt);
       this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
       this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
       this.tracker.record(this.currentProvider, this.currentModel, result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0);
       await this.hooks.run("post-turn", { response: result.text }).catch(() => {});
+      this.activityLog.log(actId, "response", result.text);
       this.activityLog.finish(actId, result.text.slice(0, 100));
       return result;
     } catch (err) {
@@ -110,10 +112,12 @@ export class CodingAgent {
             const switched = this.switchProvider(alt.name);
             if (switched.ok) {
               const fbId = this.activityLog.start("agent", "fallback", alt.name);
+              this.activityLog.log(fbId, "info", `Fallback from ${originalProvider} due to: ${msg}`);
               const fallbackResult = await this.provider.runTurn(prompt);
               this.totalUsage.inputTokens += fallbackResult.usage?.inputTokens ?? 0;
               this.totalUsage.outputTokens += fallbackResult.usage?.outputTokens ?? 0;
               this.switchProvider(originalProvider);
+              this.activityLog.log(fbId, "response", fallbackResult.text);
               this.activityLog.finish(fbId);
               return { ...fallbackResult, text: `[Fallback: ${alt.name}/${alt.model}]\n${fallbackResult.text}` };
             }

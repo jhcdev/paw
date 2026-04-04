@@ -1,5 +1,11 @@
 export type ActivityStatus = "running" | "done" | "error";
 
+export type LogEntry = {
+  timestamp: number;
+  type: "prompt" | "response" | "tool-call" | "tool-result" | "info" | "error";
+  content: string;
+};
+
 export type Activity = {
   id: string;
   type: "tool" | "agent" | "mcp" | "hook";
@@ -9,6 +15,7 @@ export type Activity = {
   startedAt: number;
   finishedAt?: number;
   expanded: boolean;
+  logs: LogEntry[];
 };
 
 let nextId = 0;
@@ -25,10 +32,23 @@ export class ActivityLog {
     const id = `act-${++nextId}`;
     this.activities.push({
       id, type, name, status: "running", detail,
-      startedAt: Date.now(), expanded: false,
+      startedAt: Date.now(), expanded: false, logs: [],
     });
+    if (detail) this.log(id, "info", detail);
     this.notify();
     return id;
+  }
+
+  log(id: string, type: LogEntry["type"], content: string): void {
+    const act = this.activities.find((a) => a.id === id);
+    if (act) {
+      act.logs.push({ timestamp: Date.now(), type, content });
+      this.notify();
+    }
+  }
+
+  getById(id: string): Activity | undefined {
+    return this.activities.find((a) => a.id === id);
   }
 
   finish(id: string, detail?: string): void {
