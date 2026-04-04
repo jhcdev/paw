@@ -102,6 +102,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [input, setInput] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const pendingRef = React.useRef<string | null>(null);
+  const lastEnterRef = React.useRef(0);
   const [cancelRef] = useState({ current: false });
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
   const [turnCount, setTurnCount] = useState(0);
@@ -492,10 +493,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
     }
 
-    // Enter to submit (no autocomplete active, debounce double-enter from IME)
+    // Enter to submit (debounce 150ms to prevent IME double-fire)
     if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
+      const now = Date.now();
+      if (now - lastEnterRef.current < 150) return; // IME double-enter guard
+      lastEnterRef.current = now;
       const value = input;
-      if (!value.trim()) return; // Skip empty (catches IME double-enter)
+      if (!value.trim()) return;
       setInput("");
       submit(value);
       return;
