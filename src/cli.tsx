@@ -115,6 +115,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [modelCursor, setModelCursor] = useState(0);
   const [providerVersion, setProviderVersion] = useState(0);
   const [activityVersion, setActivityVersion] = useState(0);
+  const [activityView, setActivityView] = useState<string | null>(null); // viewing activity ID
+  const [activityCursor, setActivityCursor] = useState(0);
+  const [activityScroll, setActivityScroll] = useState(0);
 
   // Raw stdin handler for smooth character input (especially Korean IME)
   const { stdin } = useStdin();
@@ -196,6 +199,44 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         { role: "system", text: "Conversation compacted. Recent context preserved." },
         ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
       ]);
+      return;
+    }
+
+    // Activity viewer
+    if (activityView) {
+      const act = agent.activityLog.getById(activityView);
+      if (key.escape) { setActivityView(null); setActivityScroll(0); return; }
+      if (act) {
+        const maxScroll = Math.max(0, act.logs.length - 5);
+        if (key.downArrow) { setActivityScroll((s) => Math.min(s + 1, maxScroll)); return; }
+        if (key.upArrow) { setActivityScroll((s) => Math.max(s - 1, 0)); return; }
+      }
+      return;
+    }
+
+    // Activity list selection (when activities visible and no other panel open)
+    if (!isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
+      const recentActs = agent.activityLog.getRecent(5);
+      if (recentActs.length > 0 && key.ctrl && ch === "a") {
+        // Ctrl+A = enter activity selector
+        setActivityCursor(0);
+        const acts = agent.activityLog.getRecent(5);
+        if (acts.length > 0) setActivityView("__select__");
+        return;
+      }
+    }
+
+    // Activity selector mode
+    if (activityView === "__select__") {
+      const acts = agent.activityLog.getRecent(5);
+      if (key.escape) { setActivityView(null); return; }
+      if (key.downArrow) { setActivityCursor((i) => Math.min(i + 1, acts.length - 1)); return; }
+      if (key.upArrow) { setActivityCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.return) {
+        const selected = acts[activityCursor];
+        if (selected) { setActivityView(selected.id); setActivityScroll(0); }
+        return;
+      }
       return;
     }
 
@@ -1329,24 +1370,53 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         </Box>
       ) : null}
 
-      {/* Activity Log */}
-      {agent.activityLog.getRecent(5).length > 0 ? (
+      {/* Activity Log — detail viewer */}
+      {activityView && activityView !== "__select__" ? (() => {
+        const act = agent.activityLog.getById(activityView);
+        if (!act) return null;
+        const visibleLogs = act.logs.slice(activityScroll, activityScroll + 5);
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor="#553322" paddingX={2} paddingY={1} marginBottom={1}>
+            <Text color="#ff9c73" bold>
+              {act.status === "running" ? "◉" : act.status === "done" ? "✓" : "✗"} {act.name}
+              {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : " ..."}
+            </Text>
+            {visibleLogs.map((log, i) => (
+              <Box key={i} flexDirection="column">
+                <Text color={log.type === "prompt" ? "cyan" : log.type === "response" ? "green" : log.type === "error" ? "red" : "gray"}>
+                  {log.type === "prompt" ? "  → " : log.type === "response" ? "  ← " : log.type === "error" ? "  ✗ " : "  · "}
+                  <Text color="gray" dimColor>[{log.type}]</Text>
+                </Text>
+                <Text color="gray" wrap="truncate-end">{"    " + log.content.slice(0, 150)}</Text>
+              </Box>
+            ))}
+            {act.logs.length > 5 ? <Text color="gray" italic>  {activityScroll + 1}-{Math.min(activityScroll + 5, act.logs.length)} of {act.logs.length} | ↑↓ scroll</Text> : null}
+            <Text color="gray" italic>  Esc to close</Text>
+          </Box>
+        );
+      })() : null}
+
+      {/* Activity Log — selector or inline list */}
+      {!activityView && agent.activityLog.getRecent(5).length > 0 ? (
         <Box flexDirection="column" paddingX={2} marginBottom={0}>
-          {agent.activityLog.getRecent(5).map((act) => (
+          {agent.activityLog.getRecent(5).map((act, i) => (
             <Box key={act.id} flexDirection="row">
-              <Text color={act.status === "running" ? "yellow" : act.status === "done" ? "green" : "red"}>
+              <Text color={activityView === "__select__" && i === activityCursor ? "#ff9c73" : (act.status === "running" ? "yellow" : act.status === "done" ? "green" : "red")} bold={activityView === "__select__" && i === activityCursor}>
+                {activityView === "__select__" && i === activityCursor ? "> " : "  "}
                 {act.status === "running" ? "◉ " : act.status === "done" ? "✓ " : "✗ "}
               </Text>
-              <Text color="gray">
+              <Text color={activityView === "__select__" && i === activityCursor ? "#ff9c73" : "gray"}>
                 {act.name}{act.logs.length > 0 ? ` [${act.logs.length}]` : ""}
                 {act.status === "running" ? "..." : ""}
                 {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : ""}
               </Text>
-              {act.detail && act.status !== "running" ? (
-                <Text color="gray" dimColor> — {act.detail.slice(0, 60)}</Text>
-              ) : null}
             </Box>
           ))}
+          {activityView === "__select__" ? (
+            <Text color="gray" italic>  ↑↓ select  Enter view  Esc back</Text>
+          ) : (
+            <Text color="gray" italic>  Ctrl+A to inspect</Text>
+          )}
         </Box>
       ) : null}
 
