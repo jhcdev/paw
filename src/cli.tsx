@@ -102,6 +102,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [input, setInput] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   const pendingQueueRef = React.useRef<string[]>([]);
+  const submitRef = React.useRef<(value: string) => void>(() => {});
   const [cancelRef] = useState({ current: false });
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
   const [turnCount, setTurnCount] = useState(0);
@@ -1133,12 +1134,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         if (pendingQueueRef.current.length > 0) {
           const [next, ...rest] = pendingQueueRef.current;
           pendingQueueRef.current = rest;
-          if (next) setTimeout(() => submit(next), 0);
+          if (next) setTimeout(() => submitRef.current(next), 0);
         }
       }
     },
     [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion, statusPanel],
   );
+  submitRef.current = submit;
 
   const providerLabel = PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider();
 
