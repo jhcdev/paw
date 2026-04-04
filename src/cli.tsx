@@ -601,7 +601,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (!line) return;
       if (isBusy) {
         setPendingInput(line);
-        setInput("");
+        // Don't setInput("") — already cleared by Enter key handler
         setEntries((c) => [...c, { role: "system", text: `Queued: "${line.slice(0, 50)}${line.length > 50 ? "..." : ""}" (will run after current task)` }]);
         return;
       }
