@@ -1158,12 +1158,25 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
           {teamPanel === "list" ? (
             <Box flexDirection="column" marginTop={1}>
-              {agent.getTeam().getRoles().map((r) => (
-                <Box key={r.role}>
-                  <Text color="#ffb088" bold>{`  ${r.role.padEnd(10)}`}</Text>
-                  <Text color="gray">{` ${r.provider}/${r.model}`}</Text>
-                </Box>
-              ))}
+              <Text color="#ffb088" bold>{"  Roles"}</Text>
+              {agent.getTeam().getRoles().map((r) => {
+                const b = agent.tracker.getBreakdown().find((x) => x.provider === r.provider);
+                return (
+                  <Box key={r.role} flexDirection="column">
+                    <Box>
+                      <Text color="#ff9c73" bold>{`  ${r.role.padEnd(10)}`}</Text>
+                      <Text color="#ffb088">{r.provider}</Text>
+                      <Text color="gray">/{r.model}</Text>
+                    </Box>
+                    <Text color="gray" dimColor>{"              "}{b ? `${b.requests}r  ${formatTokens(b.totalTokens)} tok` : "no usage"}</Text>
+                  </Box>
+                );
+              })}
+              <Box marginTop={1} flexDirection="column">
+                <Text color="#ffb088" bold>{"  Pipeline"}</Text>
+                <Text color="gray">{"  Plan → Code → [Review+Test] → Optimize"}</Text>
+                <Text color="gray" dimColor>{"  MAJOR → auto-rework (max 3x)"}</Text>
+              </Box>
               <Box marginTop={1} flexDirection="column">
                 {["Edit role assignment", `Toggle mode (${mode === "solo" ? "→ team" : "→ solo"})`].map((label, i) => (
                   <Box key={label}>
