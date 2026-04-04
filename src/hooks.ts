@@ -27,9 +27,9 @@ type HookConfig = {
 };
 
 const CONFIG_PATHS = [
-  ".cats-claw/hooks.json",
+  ".paw/hooks.json",
 ];
-const USER_CONFIG = path.join(os.homedir(), ".cats-claw", "hooks.json");
+const USER_CONFIG = path.join(os.homedir(), ".paw", "hooks.json");
 
 export class HookManager {
   private hooks: Hook[] = [];
@@ -82,8 +82,8 @@ export class HookManager {
           timeout: hook.timeout ?? 10000,
           env: {
             ...process.env,
-            CATS_CLAW_EVENT: event,
-            CATS_CLAW_CWD: this.cwd,
+            PAW_EVENT: event,
+            PAW_CWD: this.cwd,
             ...(context ?? {}),
           },
         });

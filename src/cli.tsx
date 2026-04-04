@@ -554,7 +554,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const { promises: fsp } = await import("node:fs");
           const p = await import("node:path");
           const o = await import("node:os");
-          const credPath = p.join(o.homedir(), ".cats-claw", "credentials.json");
+          const credPath = p.join(o.homedir(), ".paw", "credentials.json");
           let creds: Record<string, any> = {};
           try { creds = JSON.parse(await fsp.readFile(credPath, "utf8")); } catch {}
           creds[settingsProvider] = { apiKey: line.trim() };
@@ -909,7 +909,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (line === "/hooks") {
         const hooks = agent.getHooks().listHooks();
         if (hooks.length === 0) {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No hooks configured.\n\nAdd hooks to .cats-claw/hooks.json:\n{\n  \"hooks\": [\n    { \"event\": \"pre-turn\", \"command\": \"echo preprocessing...\", \"name\": \"my-hook\" }\n  ]\n}" }]);
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No hooks configured.\n\nAdd hooks to .paw/hooks.json:\n{\n  \"hooks\": [\n    { \"event\": \"pre-turn\", \"command\": \"echo preprocessing...\", \"name\": \"my-hook\" }\n  ]\n}" }]);
         } else {
           const list = hooks.map((h) => `  ${h.event}: ${h.name ?? h.command}`).join("\n");
           setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Hooks (${hooks.length}):\n${list}` }]);

@@ -5,7 +5,7 @@ import readline from "node:readline/promises";
 import pc from "picocolors";
 import type { ProviderName } from "./types.js";
 
-const CONFIG_DIR = path.join(os.homedir(), ".cats-claw");
+const CONFIG_DIR = path.join(os.homedir(), ".paw");
 const CONFIG_FILE = path.join(CONFIG_DIR, "credentials.json");
 
 type StoredCredentials = Partial<Record<ProviderName, { apiKey: string; model?: string }>>;
@@ -132,7 +132,7 @@ export async function interactiveLogin(overrides?: {
   const summary = catBox([
     `Provider: ${providerInfo.label}`,
     `Model:    ${model}`,
-    `Config:   ~/.cats-claw/`,
+    `Config:   ~/.paw/`,
   ]);
   process.stdout.write(`\n${pc.red(summary)}\n`);
   process.stdout.write(`\n  ${pc.red("=^.^=")} ${pc.bold("Let's go!")} meow~\n\n`);

@@ -49,7 +49,7 @@ const ROLE_LABELS: Record<AgentRole, string> = {
 
 // ── Performance Tracking ──
 
-const SCORES_FILE = path.join(os.homedir(), ".cats-claw", "team-scores.json");
+const SCORES_FILE = path.join(os.homedir(), ".paw", "team-scores.json");
 
 type PerformanceRecord = { totalMs: number; successCount: number; failCount: number; avgMs: number; lastUsed: string };
 type ScoresData = { version: 1; records: Partial<Record<ProviderName, Partial<Record<AgentRole, PerformanceRecord>>>> };

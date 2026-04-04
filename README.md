@@ -107,8 +107,8 @@ Example:  codex     → planner, coder (score: 9)
 ## Installation
 
 ```bash
-git clone https://github.com/jhcdev/cats-claw.git
-cd cats-claw
+git clone https://github.com/jhcdev/paw.git
+cd paw
 npm install
 npm link    # Installs 'paw' command globally
 ```
@@ -187,7 +187,7 @@ Terminal B: paw --session abc123
 
 ### Session Files
 
-Stored in `~/.cats-claw/sessions/{id}.json` (mode 0600).
+Stored in `~/.paw/sessions/{id}.json` (mode 0600).
 
 ## Skills
 
@@ -217,7 +217,7 @@ you  /explain this function
 
 Create user-wide or project-scoped skills as JSON files:
 
-**User skill** — `~/.cats-claw/skills/deploy.json`:
+**User skill** — `~/.paw/skills/deploy.json`:
 ```json
 {
   "name": "deploy",
@@ -226,7 +226,7 @@ Create user-wide or project-scoped skills as JSON files:
 }
 ```
 
-**Project skill** — `.cats-claw/skills/style.json`:
+**Project skill** — `.paw/skills/style.json`:
 ```json
 {
   "name": "style",
@@ -255,7 +255,7 @@ Hooks let you run shell commands at specific points in the REPL lifecycle.
 
 ### Configuration
 
-Create `.cats-claw/hooks.json` in your project (or `~/.cats-claw/hooks.json` for user-wide hooks):
+Create `.paw/hooks.json` in your project (or `~/.paw/hooks.json` for user-wide hooks):
 
 ```json
 {
@@ -263,7 +263,7 @@ Create `.cats-claw/hooks.json` in your project (or `~/.cats-claw/hooks.json` for
     {
       "name": "log-turns",
       "event": "post-turn",
-      "command": "echo 'Turn complete' >> ~/.cats-claw/activity.log"
+      "command": "echo 'Turn complete' >> ~/.paw/activity.log"
     },
     {
       "name": "lint-on-tool",
@@ -402,7 +402,7 @@ Select effort → high
 
 ### Auto-Assignment
 
-Roles assigned by efficiency scores (greedy unique-first). Adapts from real usage after 3+ runs per role. Scores stored in `~/.cats-claw/team-scores.json`.
+Roles assigned by efficiency scores (greedy unique-first). Adapts from real usage after 3+ runs per role. Scores stored in `~/.paw/team-scores.json`.
 
 ### Automatic Fallback
 
@@ -504,13 +504,13 @@ TEAM/gpt-5.4               turns: 2  mcp: off           local
 
 | File | Purpose |
 |------|---------|
-| `~/.cats-claw/credentials.json` | API keys (0600) |
-| `~/.cats-claw/sessions/*.json` | Session history (0600) |
-| `~/.cats-claw/team-scores.json` | Team performance |
-| `~/.cats-claw/skills/*.json` | User-wide custom skills |
-| `~/.cats-claw/hooks.json` | User-wide hooks |
-| `.cats-claw/skills/*.json` | Project-scoped custom skills |
-| `.cats-claw/hooks.json` | Project-scoped hooks |
+| `~/.paw/credentials.json` | API keys (0600) |
+| `~/.paw/sessions/*.json` | Session history (0600) |
+| `~/.paw/team-scores.json` | Team performance |
+| `~/.paw/skills/*.json` | User-wide custom skills |
+| `~/.paw/hooks.json` | User-wide hooks |
+| `.paw/skills/*.json` | Project-scoped custom skills |
+| `.paw/hooks.json` | Project-scoped hooks |
 | `.mcp.json` | MCP config |
 | `.env` | Environment (optional) |
 
@@ -553,7 +553,7 @@ you  /explain
 ### Hooks
 
 ```bash
-# .cats-claw/hooks.json
+# .paw/hooks.json
 {
   "hooks": [
     { "event": "post-tool", "command": "npm test --silent", "name": "auto-test" }
@@ -619,7 +619,7 @@ you  analyze this codebase
 10. **Korean IME** — Native stdin handling, smooth CJK input
 11. **Security audit** — 14 vulnerabilities fixed (injection, SSRF, symlink, permissions)
 12. **`paw` CLI** — 3-character global command
-13. **Anthropic removed** — Moved to separate plugin [jhcdev/cats-claw-anthropic](https://github.com/jhcdev/cats-claw-anthropic)
+13. **Anthropic removed** — Moved to separate plugin [jhcdev/paw-anthropic](https://github.com/jhcdev/paw-anthropic)
 14. **Skills system** — 7 built-in skills + user/project custom skills via JSON files
 15. **Hooks system** — Event-driven automation with 7 lifecycle events and shell command execution
 

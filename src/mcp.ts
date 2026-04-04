@@ -31,7 +31,7 @@ type ConnectedServer = {
 
 const CONFIG_PATHS = [
   ".mcp.json",
-  ".cats-claw/mcp.json",
+  ".paw/mcp.json",
 ];
 
 export type McpServerEntry = {
@@ -148,7 +148,7 @@ export class McpManager {
     }
 
     // Check home directory
-    const homeConfig = path.join(os.homedir(), ".cats-claw", "mcp.json");
+    const homeConfig = path.join(os.homedir(), ".paw", "mcp.json");
     try {
       const raw = await fs.readFile(homeConfig, "utf8");
       return JSON.parse(raw) as McpConfigFile;
@@ -189,7 +189,7 @@ export class McpManager {
     }
 
     const client = new Client({
-      name: "cats-claw",
+      name: "paw",
       version: "1.0.0",
     });
 

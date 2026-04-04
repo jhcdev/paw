@@ -9,8 +9,8 @@ export type Skill = {
   source: "builtin" | "user" | "project";
 };
 
-const SKILLS_DIR = path.join(os.homedir(), ".cats-claw", "skills");
-const PROJECT_SKILLS_DIR = ".cats-claw/skills";
+const SKILLS_DIR = path.join(os.homedir(), ".paw", "skills");
+const PROJECT_SKILLS_DIR = ".paw/skills";
 
 const BUILTIN_SKILLS: Skill[] = [
   {
@@ -64,7 +64,7 @@ async function ensureDir(dir: string): Promise<void> {
 export async function loadSkills(cwd: string): Promise<Skill[]> {
   const skills = [...BUILTIN_SKILLS];
 
-  // Load user skills from ~/.cats-claw/skills/
+  // Load user skills from ~/.paw/skills/
   try {
     await ensureDir(SKILLS_DIR);
     const files = await fs.readdir(SKILLS_DIR);
@@ -79,7 +79,7 @@ export async function loadSkills(cwd: string): Promise<Skill[]> {
     }
   } catch {}
 
-  // Load project skills from .cats-claw/skills/
+  // Load project skills from .paw/skills/
   try {
     const projectDir = path.join(cwd, PROJECT_SKILLS_DIR);
     const files = await fs.readdir(projectDir);
@@ -121,11 +121,11 @@ export function formatSkillList(skills: Skill[]): string {
     for (const s of grouped.builtin) lines.push(`  /${s.name} — ${s.description}`);
   }
   if (grouped.user.length) {
-    lines.push("\nUser (~/.cats-claw/skills/):");
+    lines.push("\nUser (~/.paw/skills/):");
     for (const s of grouped.user) lines.push(`  /${s.name} — ${s.description}`);
   }
   if (grouped.project.length) {
-    lines.push("\nProject (.cats-claw/skills/):");
+    lines.push("\nProject (.paw/skills/):");
     for (const s of grouped.project) lines.push(`  /${s.name} — ${s.description}`);
   }
   return lines.join("\n");

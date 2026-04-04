@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 
-const SESSIONS_DIR = path.join(os.homedir(), ".cats-claw", "sessions");
+const SESSIONS_DIR = path.join(os.homedir(), ".paw", "sessions");
 
 export type SessionEntry = {
   role: "system" | "user" | "assistant";
