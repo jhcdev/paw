@@ -164,7 +164,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   }, [input]);
 
   useInput((ch, key) => {
-    if (key.ctrl && ch === "c") exit();
+    if (key.ctrl && ch === "c") {
+      if (isBusy) {
+        cancelRef.current = true;
+        setEntries((c) => [...c, { role: "system", text: "Interrupted." }]);
+        setIsBusy(false);
+        return;
+      }
+      exit();
+    }
 
     // Status panel
     if (statusPanel) {
@@ -1192,7 +1200,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             <Text color="#ff9c73" bold>{"=^.^= "}</Text>
             <Text color="gray" italic>{thinkMsg}</Text>
           </Box>
-          <Text color="gray" italic>  Esc to cancel</Text>
+          <Text color="gray" italic>  Ctrl+C or Esc to cancel</Text>
         </Box>
       ) : null}
 
