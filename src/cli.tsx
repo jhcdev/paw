@@ -1148,12 +1148,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       } finally {
         busyRef.current = false;
         setIsBusy(false);
-        // Process queued messages one by one
+        // Merge all queued messages into one and process as a single turn
         if (pendingRef.current.length > 0) {
-          const next = pendingRef.current.shift()!;
-          if (next.trim()) {
+          const merged = pendingRef.current.join("\n").trim();
+          pendingRef.current = [];
+          if (merged) {
             await new Promise((r) => setTimeout(r, 10));
-            await submit(next.trim(), true);
+            await submit(merged, true);
           }
         }
       }
