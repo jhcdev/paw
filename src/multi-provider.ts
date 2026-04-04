@@ -126,6 +126,8 @@ export async function detectProviders(env: Record<string, string | undefined>): 
     }
   };
 
+  check("anthropic", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "claude-sonnet-4-20250514");
+
   // Codex CLI (no API key needed, uses its own auth)
   try {
     const { execSync } = await import("node:child_process");

@@ -10,10 +10,15 @@ type ProviderUsage = {
 const PRICING: Record<string, { input: number; output: number }> = {
   // Codex (subscription-based, no per-token cost)
   "gpt-5.4": { input: 0, output: 0 },
+  // Anthropic
+  "claude-haiku-4-5-20251001": { input: 0.80, output: 4.00 },
+  "claude-sonnet-4-20250514": { input: 3.00, output: 15.00 },
+  "claude-opus-4-20250514": { input: 15.00, output: 75.00 },
 };
 
 // Fallback pricing by provider
 const PROVIDER_DEFAULT_PRICING: Partial<Record<ProviderName, { input: number; output: number }>> = {
+  anthropic: { input: 3.00, output: 15.00 },
   codex: { input: 0, output: 0 },
 };
 

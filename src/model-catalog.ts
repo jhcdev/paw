@@ -21,6 +21,13 @@ function hasAccess(userPlan: PlanLevel, required: PlanLevel): boolean {
 // ── Full model catalogs with plan requirements ──
 
 const CATALOG: Record<ProviderName, ModelInfo[]> = {
+  anthropic: [
+    { id: "claude-haiku-4-5-20251001", name: "Haiku 4.5", tier: "fast", minPlan: "free" },
+    { id: "claude-sonnet-4-20250514", name: "Sonnet 4", tier: "standard", minPlan: "free" },
+    { id: "claude-sonnet-4-6-20250725", name: "Sonnet 4.6", tier: "standard", minPlan: "free" },
+    { id: "claude-opus-4-20250514", name: "Opus 4", tier: "strong", minPlan: "free" },
+    { id: "claude-opus-4-6-20250725", name: "Opus 4.6", tier: "strong", minPlan: "free" },
+  ],
   codex: [
     { id: "gpt-5.4", name: "GPT-5.4 (default)", tier: "strong", minPlan: "free" },
     { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", tier: "standard", minPlan: "free" },
@@ -89,6 +96,7 @@ export async function detectLiveModels(provider: ProviderName, apiKey: string, b
 /** Detect plan for a provider. API key = all models. Login = plan-based. */
 export async function detectPlan(provider: ProviderName): Promise<PlanLevel> {
   switch (provider) {
+    case "anthropic": return "api";
     case "codex": return "api";
     case "ollama":
       return "free"; // Local = all models (all marked free)

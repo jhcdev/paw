@@ -78,6 +78,7 @@ async function recordPerformance(provider: ProviderName, role: AgentRole, ms: nu
 // ── Baseline scores ──
 
 const BASELINE: Record<ProviderName, Record<AgentRole, number>> = {
+  anthropic: { planner: 10, coder: 8, reviewer: 9, tester: 7, optimizer: 8 },
   codex:  { planner: 8, coder: 9, reviewer: 7, tester: 9, optimizer: 8 },
   ollama: { planner: 5, coder: 6, reviewer: 5, tester: 6, optimizer: 5 },
 };

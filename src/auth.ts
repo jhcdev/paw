@@ -25,6 +25,7 @@ async function saveCredentials(creds: StoredCredentials): Promise<void> {
 }
 
 const PROVIDERS: { name: ProviderName; label: string; emoji: string; description: string; defaultModel: string; needsKey: boolean }[] = [
+  { name: "anthropic", label: "Anthropic", emoji: "~", description: "Claude models (API key)", defaultModel: "claude-sonnet-4-20250514", needsKey: true },
   { name: "codex", label: "Codex", emoji: "~", description: "Codex CLI models (codex login)", defaultModel: "gpt-5.4", needsKey: false },
   { name: "ollama", label: "Ollama", emoji: "~", description: "Local models, no key needed", defaultModel: "qwen3", needsKey: false },
 ];

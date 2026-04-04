@@ -29,6 +29,7 @@ type ChatEntry = {
 };
 
 const PROVIDER_LABELS: Record<ProviderName, string> = {
+  anthropic: "Anthropic",
   codex: "Codex",
   ollama: "Ollama",
 };
@@ -55,6 +56,7 @@ function formatTokens(n: number): string {
 }
 
 const ALL_PROVIDERS: { name: ProviderName; label: string; hasLogin: boolean }[] = [
+  { name: "anthropic", label: "Anthropic", hasLogin: false },
   { name: "codex", label: "Codex (CLI)", hasLogin: false },
   { name: "ollama", label: "Ollama (local)", hasLogin: false },
 ];

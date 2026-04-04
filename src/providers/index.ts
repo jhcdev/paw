@@ -1,4 +1,5 @@
 import type { LlmProvider, ProviderName } from "../types.js";
+import { AnthropicProvider } from "./anthropic.js";
 import { CodexProvider } from "./codex.js";
 import { OpenAIProvider } from "./openai.js";
 
@@ -10,6 +11,8 @@ export function createProvider(args: {
   baseUrl?: string;
 }): LlmProvider {
   switch (args.provider) {
+    case "anthropic":
+      return new AnthropicProvider(args);
     case "codex":
       return new CodexProvider({ model: args.model, cwd: args.cwd });
     case "ollama":

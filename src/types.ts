@@ -1,4 +1,4 @@
-export type ProviderName = "codex" | "ollama";
+export type ProviderName = "anthropic" | "codex" | "ollama";
 
 export type Result<T, E> =
   | { ok: true; value: T }
