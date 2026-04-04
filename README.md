@@ -1,14 +1,14 @@
-# Cat's Claw 🐱
+# Paw 🐱
 
 ```
-  /\_/\   Cat's Claw
+  /\_/\   Paw
  ( o.o )  Scratch your code into shape~
   > ^ <
 ```
 
 Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, session sync, skills, hooks, and automatic fallback.
 
-> **Disclaimer:** Cat's Claw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by OpenAI or any AI provider. Codex, GPT, and related names are trademarks of their respective owners.
+> **Disclaimer:** Paw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by OpenAI or any AI provider. Codex, GPT, and related names are trademarks of their respective owners.
 
 ## Architecture
 

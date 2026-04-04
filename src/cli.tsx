@@ -984,7 +984,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     <Box flexDirection="column" paddingX={1}>
       <Box marginTop={1} borderStyle="round" borderColor="#d97757" flexDirection="column" paddingX={2} paddingY={1}>
         <Box flexDirection="column">
-          <Text color="#ff9c73" bold>{"  /\\_/\\   Cat's Claw v1.0"}</Text>
+          <Text color="#ff9c73" bold>{"  /\\_/\\   Paw v1.0"}</Text>
           <Text color="#ff9c73">{" ( o.o )  Scratch your code into shape~"}</Text>
           <Text color="#ff9c73">{"  > ^ <   "}<Text color="gray" italic>meow~</Text></Text>
         </Box>
@@ -1337,7 +1337,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       {statusPanel ? (
         <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
-          <Text color="#ff9c73" bold>Cat's Claw v1.0.0</Text>
+          <Text color="#ff9c73" bold>Paw v1.0.0</Text>
           <Text color="gray">Mode: <Text bold color={mode === "team" ? "#ff9c73" : "white"}>{mode.toUpperCase()}</Text></Text>
           <Text color="gray">Active: <Text bold color="white">{agent.getActiveProvider()}/{agent.getActiveModel()}</Text></Text>
 

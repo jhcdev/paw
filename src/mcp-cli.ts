@@ -83,7 +83,7 @@ export async function mcpCli(argv: string[], cwd: string): Promise<void> {
 }
 
 function printMcpHelp(): void {
-  process.stdout.write(`${pc.bold("Cat's Claw MCP")} — Manage MCP servers\n\n`);
+  process.stdout.write(`${pc.bold("Paw MCP")} — Manage MCP servers\n\n`);
   process.stdout.write(`Commands:\n`);
   process.stdout.write(`  mcp list                              List configured servers\n`);
   process.stdout.write(`  mcp add [options] <name> [-- cmd...]   Add a server\n`);
@@ -215,7 +215,7 @@ async function mcpAdd(argv: string[], cwd: string): Promise<void> {
   await writeConfig(cwd, config);
   process.stdout.write(`${pc.green("+")} Added "${name}" (${transport})\n`);
   process.stdout.write(`  Config: ${configPath(cwd)}\n`);
-  process.stdout.write(`  Restart Cat's Claw to connect.\n`);
+  process.stdout.write(`  Restart Paw to connect.\n`);
 }
 
 async function mcpAddJson(argv: string[], cwd: string): Promise<void> {

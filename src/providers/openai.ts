@@ -3,7 +3,7 @@ import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/reso
 import { toolDefinitions, toolHandlers } from "../tools.js";
 import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler, TokenUsage } from "../types.js";
 
-const SYSTEM_PROMPT = `You are Cat's Claw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
+const SYSTEM_PROMPT = `You are Paw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
 
 function toOpenAITools(extra: ToolDefinition[] = []): ChatCompletionTool[] {
   return [...toolDefinitions, ...extra].map((t) => ({

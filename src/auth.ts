@@ -55,7 +55,7 @@ export async function interactiveLogin(overrides?: {
   } else {
     const banner = [
       "  /\\_/\\",
-      " ( o.o )  Cat's Claw",
+      " ( o.o )  Paw",
       "  > ^ <   Scratch your code into shape~",
     ];
     process.stdout.write(`\n${pc.red(banner.join("\n"))}\n\n`);

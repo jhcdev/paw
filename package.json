@@ -6,7 +6,7 @@
   "bin": {
     "paw": "./bin/paw"
   },
-  "description": "Cat's Claw — Multi-provider AI coding agent for the terminal.",
+  "description": "Paw — Multi-provider AI coding agent for the terminal.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",

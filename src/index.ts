@@ -27,7 +27,7 @@ type ParsedArgs = {
 const VALID_PROVIDERS = new Set<string>(["codex", "ollama"]);
 
 function printHelp(): void {
-  process.stdout.write(`${pc.bold(pc.cyan("Cat's Claw"))} — Multi-provider terminal coding assistant\n\n`);
+  process.stdout.write(`${pc.bold(pc.cyan("Paw"))} — Multi-provider terminal coding assistant\n\n`);
   process.stdout.write(`Usage:\n`);
   process.stdout.write(`  npm start                          Interactive login + REPL\n`);
   process.stdout.write(`  npm start -- "summarize this"      One-shot prompt\n`);
@@ -182,7 +182,7 @@ async function main(): Promise<void> {
     if (["/status", "/settings", "/providers", "/cost", "/version"].includes(args.prompt)) {
       const registered = agent.getMulti().getRegistered();
       const teamRoles = agent.getTeam().getRoles();
-      process.stdout.write(`Cat's Claw v1.0.0\n`);
+      process.stdout.write(`Paw v1.0.0\n`);
       process.stdout.write(`Active: ${pc.cyan(agent.getActiveProvider())}/${agent.getActiveModel()}\n`);
       process.stdout.write(`\nProviders (${registered.length}):\n`);
       for (const p of registered) process.stdout.write(`  ${p.name === agent.getActiveProvider() ? "* " : "  "}${p.name} — ${p.model}\n`);
@@ -230,7 +230,7 @@ async function main(): Promise<void> {
       await agent.shutdown(); return;
     }
     if (args.prompt === "/doctor") {
-      process.stdout.write(`Cat's Claw v1.0.0\n`);
+      process.stdout.write(`Paw v1.0.0\n`);
       process.stdout.write(`Node: ${process.version} | ${process.platform} ${process.arch}\n`);
       process.stdout.write(`Provider: ${agent.getActiveProvider()}/${agent.getActiveModel()}\n`);
       process.stdout.write(`Providers: ${agent.getMulti().getRegistered().map((p) => p.name).join(", ")}\n`);
