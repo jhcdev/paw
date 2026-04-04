@@ -82,6 +82,7 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
   { name: "/auto", desc: "autonomous agent mode" },
+  { name: "/pipe", desc: "feed shell output to AI" },
 ];
 
 function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions }) {
@@ -607,6 +608,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /skills   - list available skills",
             "  /hooks    - list configured hooks",
             "  /auto <task> - autonomous agent (plan→execute→verify→fix loop)",
+            "  /pipe <cmd>  - run command, AI analyzes output",
+            "  /pipe fix <cmd> - run, fix errors, repeat until pass",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -921,6 +924,49 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+
+      // ── pipe ──
+      if (line.startsWith("/pipe ")) {
+        const pipeArgs = line.slice(6).trim();
+        if (!pipeArgs) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage:\n  /pipe <command> — run and analyze\n  /pipe fix <command> — run, fix errors, repeat\n  /pipe watch <command> — watch and analyze" }]);
+          return;
+        }
+        setEntries((c) => [...c, { role: "user", text: line }]);
+        setIsBusy(true);
+
+        try {
+          const { PipeAgent } = await import("./pipe-agent.js");
+          const pipe = new PipeAgent(
+            options.cwd,
+            (prompt) => agent.runTurn(prompt),
+            (msg) => setThinkMsg(msg),
+          );
+
+          let result;
+          if (pipeArgs.startsWith("fix ")) {
+            result = await pipe.fix(pipeArgs.slice(4).trim());
+          } else if (pipeArgs.startsWith("watch ")) {
+            result = await pipe.watch(pipeArgs.slice(6).trim());
+          } else {
+            result = await pipe.analyze(pipeArgs);
+          }
+
+          const header = result.fixed
+            ? `FIXED after ${result.iterations} iteration(s) (${(result.totalMs / 1000).toFixed(1)}s)`
+            : result.mode === "analyze"
+              ? `Analyzed (${(result.totalMs / 1000).toFixed(1)}s)`
+              : `${result.iterations} iteration(s), not fully fixed (${(result.totalMs / 1000).toFixed(1)}s)`;
+
+          setTurnCount((c) => c + 1);
+          setEntries((c) => [...c, { role: "assistant", text: `[pipe: ${header}]\n${result.analysis}` }]);
+        } catch (error) {
+          setEntries((c) => [...c, { role: "system", text: `Pipe failed: ${error instanceof Error ? error.message : String(error)}` }]);
+        } finally {
+          setIsBusy(false);
+        }
+        return;
+      }
 
       // ── auto ──
       if (line.startsWith("/auto ")) {

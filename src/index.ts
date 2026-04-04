@@ -278,6 +278,24 @@ async function main(): Promise<void> {
         const result = await agent.getMulti().ask(target, askPrompt);
         process.stdout.write(`[${target}] ${result.text}\n`);
       }
+    } else if (args.prompt.startsWith("/pipe ")) {
+      const pipeArgs = args.prompt.slice(6).trim();
+      const { PipeAgent } = await import("./pipe-agent.js");
+      const pipe = new PipeAgent(
+        args.cwd,
+        (prompt) => agent.runTurn(prompt),
+        (msg) => process.stdout.write(`${pc.gray(msg)}\n`),
+      );
+      let result;
+      if (pipeArgs.startsWith("fix ")) {
+        result = await pipe.fix(pipeArgs.slice(4).trim());
+      } else if (pipeArgs.startsWith("watch ")) {
+        result = await pipe.watch(pipeArgs.slice(6).trim());
+      } else {
+        result = await pipe.analyze(pipeArgs);
+      }
+      const status = result.fixed ? "FIXED" : result.mode === "analyze" ? "Analyzed" : "Not fixed";
+      process.stdout.write(`\n[${status}] (${(result.totalMs / 1000).toFixed(1)}s)\n${result.analysis}\n`);
     } else if (args.prompt.startsWith("/auto ")) {
       const autoGoal = args.prompt.slice(6).trim();
       const { AutoAgent } = await import("./auto-agent.js");
