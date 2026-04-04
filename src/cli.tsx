@@ -187,20 +187,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
 
-    // Activity viewer
-    if (activityView) {
-      const act = agent.activityLog.getById(activityView);
-      if (key.escape) { setActivityView(null); setActivityScroll(0); return; }
-      if (act) {
-        const maxScroll = Math.max(0, act.logs.length - 5);
-        if (key.downArrow) { setActivityScroll((s) => Math.min(s + 1, maxScroll)); return; }
-        if (key.upArrow) { setActivityScroll((s) => Math.max(s - 1, 0)); return; }
-      }
-      return;
-    }
-
-
-    // Activity selector mode
+    // Activity selector mode (must check BEFORE detail viewer)
     if (activityView === "__select__") {
       const acts = agent.activityLog.getRecent(5);
       if (key.escape) { setActivityView(null); return; }
@@ -210,6 +197,18 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const selected = acts[activityCursor];
         if (selected) { setActivityView(selected.id); setActivityScroll(0); }
         return;
+      }
+      return;
+    }
+
+    // Activity detail viewer
+    if (activityView && activityView !== "__select__") {
+      if (key.escape) { setActivityView(null); setActivityScroll(0); return; }
+      const act = agent.activityLog.getById(activityView);
+      if (act) {
+        const maxScroll = Math.max(0, act.logs.length - 5);
+        if (key.downArrow) { setActivityScroll((s) => Math.min(s + 1, maxScroll)); return; }
+        if (key.upArrow) { setActivityScroll((s) => Math.max(s - 1, 0)); return; }
       }
       return;
     }
