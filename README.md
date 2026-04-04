@@ -8,6 +8,8 @@
 
 Multi-provider AI coding agent for the terminal. Solo or team mode, MCP support, session sync, skills, hooks, and automatic fallback.
 
+![Paw Terminal](assets/screenshot.png)
+
 > **Disclaimer:** Paw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI or any AI provider. Claude, Codex, GPT, and related names are trademarks of their respective owners.
 
 ## Architecture
