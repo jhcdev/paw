@@ -20,6 +20,7 @@ export type SessionData = {
   createdAt: string;
   updatedAt: string;
   entries: SessionEntry[];
+  writerId?: string;
 };
 
 export type SessionSummary = {

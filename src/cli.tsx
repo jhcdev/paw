@@ -135,16 +135,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
   // All input handled in useInput below (no separate useStdin)
 
+  // Unique ID for this terminal instance — used to ignore our own session writes
+  const [writerId] = useState(() => Math.random().toString(36).slice(2, 10));
+
   // Watch session file for changes from other terminals
-  const lastSaveRef = React.useRef(0);
   React.useEffect(() => {
     const unwatch = watchSession(sessionId, (data) => {
-      // Ignore our own writes (within 2s of last save)
-      if (Date.now() - lastSaveRef.current < 2000) return;
+      if (data.writerId === writerId) return; // ignore our own writes
       setEntries(data.entries.map((e) => ({ role: e.role, text: e.text })));
     });
     return unwatch;
-  }, [sessionId]);
+  }, [sessionId, writerId]);
 
   // Listen for activity log changes
   React.useEffect(() => {
@@ -164,8 +165,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         entries: entries.map((e) => ({ role: e.role, text: e.text, timestamp: new Date().toISOString() })),
+        writerId,
       };
-      lastSaveRef.current = Date.now();
       saveSession(data).catch(() => {});
     }, 1000);
     return () => clearTimeout(timeout);
