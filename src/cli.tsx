@@ -468,15 +468,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
 
-    // Ctrl+A — open activity viewer
-    if (key.ctrl && ch === "a") {
-      const acts = agent.activityLog.getRecent(5);
-      if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); }
-      return;
-    }
-
     // Regular character input (including Korean/CJK)
     if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
+      // "!" with empty input → open activity viewer
+      if (ch === "!" && input === "") {
+        const acts = agent.activityLog.getRecent(5);
+        if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); return; }
+      }
       setInput((prev) => {
         const next = prev + ch;
         if (next.startsWith("/")) setSelectedIdx(0);
@@ -1358,7 +1356,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           {activityView === "__select__" ? (
             <Text color="gray" italic>  ↑↓ select  Enter view  Esc back</Text>
           ) : (
-            <Text color="gray" italic>  Ctrl+A to inspect</Text>
+            <Text color="gray" italic>  ! to inspect</Text>
           )}
         </Box>
       ) : null}
