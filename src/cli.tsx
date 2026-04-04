@@ -159,7 +159,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     if (key.ctrl && ch === "c") exit();
 
     // ↓ = enter activity selector (below input, when no other panel active)
-    if (key.downArrow && suggestions.length === 0 && !isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
+    if (key.downArrow && suggestions.length === 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
       const acts = agent.activityLog.getRecent(5);
       if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); return; }
     }
