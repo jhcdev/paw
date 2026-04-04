@@ -100,6 +100,8 @@ Example:  anthropic → planner, reviewer, optimizer
 - **Korean IME** — Native stdin handling for smooth CJK input
 - **Autocomplete** — `/` triggers command list; Enter executes, Tab fills
 - **Security hardened** — Injection protection, SSRF blocking, symlink guards
+- **`/auto` mode** — Autonomous agent: plan → execute → verify → fix loop until done
+- **`/pipe` mode** — Feed shell output to AI: analyze, auto-fix errors, or watch commands
 
 ## Requirements
 
@@ -437,6 +439,65 @@ Roles assigned by efficiency scores (greedy unique-first). Adapts from real usag
 
 Provider fails → instantly tries next. Ollama = local fallback (free, no rate limits).
 
+## Paw Exclusive Features
+
+### `/auto` — Autonomous Agent
+
+Runs a self-driving agent that works until the task is done — no manual intervention.
+
+```
+/auto add input validation to all API endpoints
+/auto refactor the auth module to use JWT
+/auto fix all TypeScript errors in the project
+```
+
+Flow:
+```
+◉ Analyzing project...          (reads files, package.json)
+✓ Creating plan...               (step-by-step actions)
+◉ Executing step 1/10...        (reads/writes/runs commands)
+◉ Executing step 2/10...
+◉ Verifying...                   (runs build + tests)
+✗ Build error found
+◉ Fixing errors...               (auto-patches code)
+◉ Verifying...
+✓ All checks passed
+✓ COMPLETED (32.4s)
+```
+
+- Plans work, executes with tools, verifies with build/test
+- Auto-fixes errors and retries (max 10 iterations)
+- Multi-provider: fallback if one provider fails mid-task
+
+### `/pipe` — Shell Output → AI
+
+Feeds real terminal output directly to the AI for analysis or automatic fixing.
+
+```
+/pipe npm test              → AI analyzes test failures
+/pipe fix npm run build     → AI fixes build errors, re-runs until clean
+/pipe fix tsc --noEmit      → AI fixes type errors automatically
+/pipe watch npm start       → AI monitors startup output
+```
+
+Three modes:
+| Mode | Command | What happens |
+|------|---------|-------------|
+| Analyze | `/pipe <cmd>` | Run → AI explains output |
+| Fix | `/pipe fix <cmd>` | Run → AI fixes errors → re-run (loop, max 5) |
+| Watch | `/pipe watch <cmd>` | Run with timeout → AI analyzes |
+
+Example fix loop:
+```
+Running (1/5): npm run build
+Errors found — fixing (1/5)...
+Running (2/5): npm run build
+Errors found — fixing (2/5)...
+Running (3/5): npm run build
+Pass — no errors
+FIXED after 3 iteration(s) (18.2s)
+```
+
 ## Tools (8 built-in)
 
 | Tool | Description |
@@ -500,6 +561,8 @@ Supports stdio, HTTP, SSE. Tools auto-injected into all providers. Failed connec
 | `/doctor` | Diagnostics |
 | `/clear` | Reset conversation |
 | `/exit` | Quit |
+| `/auto <task>` | Autonomous agent mode |
+| `/pipe <cmd>` | Feed shell output to AI (fix/watch) |
 
 ### Keyboard
 
@@ -652,6 +715,8 @@ you  analyze this codebase
 14. **Skills system** — 7 built-in skills + user/project custom skills via JSON files
 15. **Hooks system** — Event-driven automation with 7 lifecycle events and shell command execution
 16. **Anthropic provider** — API key mode with per-token pricing
+17. **`/auto` mode** — Autonomous plan→execute→verify→fix agent loop
+18. **`/pipe` mode** — Shell output → AI analysis/fix/watch
 
 ## License
 
