@@ -1338,13 +1338,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         <Text color="gray">{(() => {
           const breakdown = agent.tracker.getBreakdown();
           if (breakdown.length === 0) return `reqs: 0`;
-          return breakdown.map((b) => `${b.provider}:${b.requests}`).join(" ");
+          return breakdown.map((b) => {
+            const cost = b.estimatedCost > 0 ? ` $${b.estimatedCost.toFixed(3)}` : "";
+            const tok = b.totalTokens > 0 ? ` ${formatTokens(b.totalTokens)}` : "";
+            return `${b.provider}:${b.requests}r${tok}${cost}`;
+          }).join("  ");
         })()}</Text>
         <Text color={agent.getMcpStatus().length > 0 ? "green" : "gray"}>
           mcp: {agent.getMcpStatus().length > 0 ? `${agent.getMcpStatus().length} server(s)` : "off"}
-        </Text>
-        <Text color="gray">
-          {agent.getActiveProvider() !== "ollama" ? `tokens: ${formatTokens(agent.getUsage().inputTokens + agent.getUsage().outputTokens)}` : "local"}
         </Text>
       </Box>
 
