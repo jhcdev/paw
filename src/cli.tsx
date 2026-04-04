@@ -493,9 +493,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
     }
 
-    // Enter to submit (no autocomplete active)
+    // Enter to submit (no autocomplete active, debounce double-enter from IME)
     if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
       const value = input;
+      if (!value.trim()) return; // Skip empty (catches IME double-enter)
       setInput("");
       submit(value);
       return;
