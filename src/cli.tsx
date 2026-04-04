@@ -158,8 +158,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   useInput((ch, key) => {
     if (key.ctrl && ch === "c") exit();
 
-    // ↑ with empty input = enter activity selector
-    if (key.upArrow && input === "" && !isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
+    // ↑ = enter activity selector (when no other panel/autocomplete is active)
+    if (key.upArrow && suggestions.length === 0 && !isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
       const acts = agent.activityLog.getRecent(5);
       if (acts.length > 0) { setActivityCursor(acts.length - 1); setActivityView("__select__"); return; }
     }
