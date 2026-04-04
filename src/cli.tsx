@@ -158,10 +158,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   useInput((ch, key) => {
     if (key.ctrl && ch === "c") exit();
 
-    // ↑ = enter activity selector (when no other panel/autocomplete is active)
-    if (key.upArrow && suggestions.length === 0 && !isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
+    // ↓ = enter activity selector (below input, when no other panel active)
+    if (key.downArrow && suggestions.length === 0 && !isBusy && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
       const acts = agent.activityLog.getRecent(5);
-      if (acts.length > 0) { setActivityCursor(acts.length - 1); setActivityView("__select__"); return; }
+      if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); return; }
     }
 
     // Ctrl+L = clear
@@ -1312,56 +1312,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         </Box>
       ) : null}
 
-      {/* Activity Log — detail viewer */}
-      {activityView && activityView !== "__select__" ? (() => {
-        const act = agent.activityLog.getById(activityView);
-        if (!act) return null;
-        const visibleLogs = act.logs.slice(activityScroll, activityScroll + 5);
-        return (
-          <Box flexDirection="column" borderStyle="round" borderColor="#553322" paddingX={2} paddingY={1} marginBottom={1}>
-            <Text color="#ff9c73" bold>
-              {act.status === "running" ? "◉" : act.status === "done" ? "✓" : "✗"} {act.name}
-              {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : " ..."}
-            </Text>
-            {visibleLogs.map((log, i) => (
-              <Box key={i} flexDirection="column">
-                <Text color={log.type === "prompt" ? "cyan" : log.type === "response" ? "green" : log.type === "error" ? "red" : "gray"}>
-                  {log.type === "prompt" ? "  → " : log.type === "response" ? "  ← " : log.type === "error" ? "  ✗ " : "  · "}
-                  <Text color="gray" dimColor>[{log.type}]</Text>
-                </Text>
-                <Text color="gray" wrap="truncate-end">{"    " + log.content.slice(0, 150)}</Text>
-              </Box>
-            ))}
-            {act.logs.length > 5 ? <Text color="gray" italic>  {activityScroll + 1}-{Math.min(activityScroll + 5, act.logs.length)} of {act.logs.length} | ↑↓ scroll</Text> : null}
-            <Text color="gray" italic>  Esc to close</Text>
-          </Box>
-        );
-      })() : null}
-
-      {/* Activity Log — selector or inline list */}
-      {!activityView && agent.activityLog.getRunning().length > 0 ? (
-        <Box flexDirection="column" paddingX={2} marginBottom={0}>
-          {agent.activityLog.getRunning().map((act, i) => (
-            <Box key={act.id} flexDirection="row">
-              <Text color={activityView === "__select__" && i === activityCursor ? "#ff9c73" : (act.status === "running" ? "yellow" : act.status === "done" ? "green" : "red")} bold={activityView === "__select__" && i === activityCursor}>
-                {activityView === "__select__" && i === activityCursor ? "> " : "  "}
-                {act.status === "running" ? "◉ " : act.status === "done" ? "✓ " : "✗ "}
-              </Text>
-              <Text color={activityView === "__select__" && i === activityCursor ? "#ff9c73" : "gray"}>
-                {act.name}{act.logs.length > 0 ? ` [${act.logs.length}]` : ""}
-                {act.status === "running" ? "..." : ""}
-                {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : ""}
-              </Text>
-            </Box>
-          ))}
-          {activityView === "__select__" ? (
-            <Text color="gray" italic>  ↑↓ select  Enter view  Esc back</Text>
-          ) : (
-            <Text color="gray" italic>  ↑ to inspect</Text>
-          )}
-        </Box>
-      ) : null}
-
       {suggestions.length > 0 && mcpMode === "off" ? (
         <Box flexDirection="column" paddingX={2} marginBottom={0}>
           {suggestions.map((cmd, i) => (
@@ -1394,6 +1344,62 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           {agent.getActiveProvider() !== "ollama" ? `tokens: ${formatTokens(agent.getUsage().inputTokens + agent.getUsage().outputTokens)}` : "local"}
         </Text>
       </Box>
+
+      {/* Activity Log — below input */}
+      {activityView && activityView !== "__select__" ? (() => {
+        const act = agent.activityLog.getById(activityView);
+        if (!act) return null;
+        const visibleLogs = act.logs.slice(activityScroll, activityScroll + 5);
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor="#553322" paddingX={2} paddingY={1}>
+            <Text color="#ff9c73" bold>
+              {act.status === "running" ? "◉" : act.status === "done" ? "✓" : "✗"} {act.name}
+              {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : " ..."}
+            </Text>
+            {visibleLogs.map((log, i) => (
+              <Box key={i} flexDirection="column">
+                <Text color={log.type === "prompt" ? "cyan" : log.type === "response" ? "green" : log.type === "error" ? "red" : "gray"}>
+                  {log.type === "prompt" ? "  → " : log.type === "response" ? "  ← " : log.type === "error" ? "  ✗ " : "  · "}
+                  <Text color="gray" dimColor>[{log.type}]</Text>
+                </Text>
+                <Text color="gray" wrap="truncate-end">{"    " + log.content.slice(0, 150)}</Text>
+              </Box>
+            ))}
+            {act.logs.length > 5 ? <Text color="gray" italic>  {activityScroll + 1}-{Math.min(activityScroll + 5, act.logs.length)} of {act.logs.length} | ↑↓ scroll</Text> : null}
+            <Text color="gray" italic>  Esc to close</Text>
+          </Box>
+        );
+      })() : null}
+
+      {activityView === "__select__" ? (
+        <Box flexDirection="column" paddingX={2}>
+          {agent.activityLog.getRecent(5).map((act, i) => (
+            <Box key={act.id} flexDirection="row">
+              <Text color={i === activityCursor ? "#ff9c73" : (act.status === "running" ? "yellow" : act.status === "done" ? "green" : "red")} bold={i === activityCursor}>
+                {i === activityCursor ? "> " : "  "}
+                {act.status === "running" ? "◉ " : act.status === "done" ? "✓ " : "✗ "}
+              </Text>
+              <Text color={i === activityCursor ? "#ff9c73" : "gray"}>
+                {act.name}{act.logs.length > 0 ? ` [${act.logs.length}]` : ""}
+                {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : "..."}
+              </Text>
+            </Box>
+          ))}
+          <Text color="gray" italic>  ↑↓ select  Enter view  Esc back</Text>
+        </Box>
+      ) : null}
+
+      {!activityView && agent.activityLog.getRunning().length > 0 ? (
+        <Box flexDirection="column" paddingX={2}>
+          {agent.activityLog.getRunning().map((act) => (
+            <Box key={act.id} flexDirection="row">
+              <Text color="yellow">{"  ◉ "}</Text>
+              <Text color="gray">{act.name}...</Text>
+            </Box>
+          ))}
+          <Text color="gray" italic>  ↓ to inspect</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
