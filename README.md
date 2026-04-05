@@ -6,11 +6,97 @@
   > ^ <
 ```
 
-Multi-provider AI coding agent for the terminal. Smart routing, solo or team mode, MCP support, session sync, skills, hooks, and automatic fallback.
+**One terminal. Every AI model. No lock-in.**
+
+Paw is an independent, multi-provider AI coding agent that runs Anthropic, OpenAI, and local models from a single CLI — with automatic fallback, parallel sub-agents, and built-in safety.
 
 ![Paw Terminal](assets/screenshot.png)
 
-> **Disclaimer:** Paw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI or any AI provider. Claude, Codex, GPT, and related names are trademarks of their respective owners.
+> **Disclaimer:** Paw is an independent, third-party project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI or any AI provider.
+
+---
+
+## Why Paw
+
+### 1. Multi-Provider, Zero Lock-in
+
+Other tools lock you into one AI provider. Paw uses **Anthropic, Codex (OpenAI), and Ollama** simultaneously — switching automatically when rate limits hit, distributing work across models, and letting you pick the right model for each task.
+
+```
+Provider Call → Success → Response
+      │
+      └─ Error (429/quota) → Next Provider → ... → Ollama (last resort, free)
+```
+
+### 2. Parallel Sub-Agents (`/spawn`)
+
+Don't wait for one task to finish before starting the next. Spawn independent agents that work **in parallel** — even while the main AI is thinking.
+
+```
+you  explain the architecture        ← main AI starts working
+you  /spawn add tests for auth       ← runs immediately in background
+you  /spawn update README            ← another agent, different provider
+you  /tasks                          ← check progress anytime
+
+  ◉ #1 [running] add tests... (codex/gpt-5.4) 12s...
+  ◉ #2 [running] update README (ollama/llama3) 8s...
+```
+
+Each agent gets its own provider instance, round-robin distributed. Choose provider and model interactively or inline:
+
+```
+/spawn                                ← opens ↑↓ provider → model → task panel
+/spawn codex/gpt-5.4 fix all lint    ← inline with specific model
+```
+
+### 3. Trust Layer (`/verify`)
+
+AI-generated code has [1.7x more issues](https://www.coderabbit.ai/blog/state-of-ai-vs-human-code-generation-report) than human code. Paw's verify mode automatically sends every code change to a **different AI for review** — catching bugs before they land.
+
+```
+you  add user authentication endpoint
+=^.^= [writes src/auth.ts]
+
+---
+Verification (by ollama/llama3):
+  Confidence: 85/100
+  warning: src/auth.ts — Potential SQL injection in query builder
+---
+```
+
+Choose the reviewer's provider, model, and effort level via `/verify` panel.
+
+### 4. Agent Safety (`/safety`)
+
+Every tool call is classified by risk level. Destructive commands (`rm`, `terraform destroy`, `kubectl delete`, `DROP TABLE`) are **blocked automatically** with git checkpoints.
+
+```
+[LOW]  read_file, search_text     → runs immediately
+[MED]  write_file, edit_file      → runs immediately
+[HIGH] rm, git reset, npm publish → blocked + git stash checkpoint
+[CRIT] rm -rf /, mkfs, curl|sh   → permanently blocked
+```
+
+### 5. Extensible: Skills + Hooks (Claude Code-style)
+
+**Skills** extend what Paw can do — custom slash commands with `$ARGUMENTS`, `` !`command` `` injection, and directory-based `SKILL.md`:
+
+```
+/deploy production              ← $ARGUMENTS = "production"
+/fix-issue 123                  ← arguments passed to skill prompt
+/review src/auth.ts             ← built-in skill
+```
+
+**Hooks** automate workflows at 10 lifecycle events — with regex matchers, JSON stdin, and exit code blocking:
+
+```json
+{ "hooks": { "post-tool": [
+  { "matcher": "edit_file|write_file",
+    "hooks": [{ "type": "command", "command": "npx prettier --write $(jq -r '.tool_input.path')" }] }
+]}}
+```
+
+---
 
 ## Architecture
 
@@ -84,28 +170,13 @@ Example:  anthropic → planner, reviewer, optimizer
 
 ## Features
 
-- **3 Providers** — Anthropic (API), Codex (CLI), Ollama (local)
-- **Auto-detect** — No login prompt; finds Codex CLI and Ollama automatically
-- **Solo/Team mode** — Single provider or 5-agent pipeline in one terminal
-- **Session sync** — Conversations persist and sync across terminals in real-time (fs.watch)
-- **Resume** — `--continue` or `--session <id>` to pick up where you left off
-- **Arrow-key UI** — All panels: ↑↓ navigate, Enter select, Esc back
-- **Effort levels** — Codex: low/medium/high/max (configurable per model and per team role)
-- **MCP support** — External tools via Model Context Protocol (stdio/http/sse)
-- **Skills** — 7 built-in + custom skills with $ARGUMENTS, !`command` injection, directory-based SKILL.md
-- **Hooks** — 10 lifecycle events, regex matchers, JSON stdin, exit 2 = block, settings.json + markdown config
-- **Auto-fallback** — Rate limit? Instantly tries next provider
-- **Live Ollama detection** — Shows actually pulled models with sizes
-- **Usage tracking** — Per-provider token count with estimated cost
-- **Korean IME** — Native stdin handling for smooth CJK input
-- **Message queue** — Type while AI is thinking; queued messages merge into one turn
-- **Autocomplete** — `/` triggers command list; Enter executes, Tab fills
-- **Security hardened** — Injection protection, SSRF blocking, symlink guards
-- **`/verify` mode** — Cross-provider code verification with reviewer provider/model/effort selection (↑↓)
-- **`/safety` guards** — Risk classification for all tool calls; blocks destructive commands automatically
-- **`/auto` mode** — Autonomous agent: plan → execute → verify → fix loop until done
-- **`/pipe` mode** — Feed shell output to AI: analyze, auto-fix errors, or watch commands
-- **Smart Router** — Auto-detects best mode from your message (EN/KO/JA/ZH)
+| Category | Features |
+|----------|----------|
+| **Providers** | Anthropic, Codex (OpenAI), Ollama (local) — auto-detect, auto-fallback |
+| **Agent Modes** | Solo, Team (5-agent pipeline), `/auto` (autonomous), `/spawn` (parallel sub-agents) |
+| **Trust & Safety** | `/verify` (cross-provider review), `/safety` (risk classification + blocking) |
+| **Extensibility** | Skills ($ARGUMENTS, !`cmd`, SKILL.md), Hooks (10 events, matchers, JSON stdin, blocking) |
+| **Developer UX** | Arrow-key UI, message queue, session sync, Smart Router (EN/KO/JA/ZH), MCP support |
 
 ## Requirements
 
@@ -625,6 +696,64 @@ Provider fails → instantly tries next. Ollama = local fallback (free, no rate 
 
 ## Paw Exclusive Features
 
+### `/spawn` — Parallel Sub-Agents
+
+Spawn independent agents that work in parallel on different tasks. Unlike `/auto` (one agent, sequential) or `/team` (fixed pipeline), `/spawn` creates arbitrary agents that run simultaneously.
+
+**Interactive (↑↓ panel):**
+
+```
+/spawn
+╭─ Spawn Agent ──────────────────────────╮
+│ Select provider:                        │
+│  > anthropic — claude-sonnet-4-6       │
+│    codex — gpt-5.4                     │
+│    ollama — llama3                     │
+╰────────────────────────────────────────╯
+         ↓ Enter
+╭─ Select model for anthropic ──────────╮
+│  > claude-haiku-4-5 — Haiku 4.5       │
+│    claude-sonnet-4-6 — Sonnet 4.6     │
+╰────────────────────────────────────────╯
+         ↓ Enter
+╭─ Enter task: ─────────────────────────╮
+│ > add tests for auth module_           │
+╰────────────────────────────────────────╯
+```
+
+**Inline (fast):**
+
+```
+/spawn add tests for auth               ← round-robin provider
+/spawn anthropic fix lint errors         ← specific provider
+/spawn codex/gpt-5.4 update README      ← provider + model
+```
+
+**Works while AI is thinking** — `/spawn` and `/tasks` bypass the message queue:
+
+```
+you  explain the architecture        ← AI thinking...
+you  /spawn add tests for auth       ← spawns immediately
+you  /spawn update README            ← spawns immediately
+you  /tasks                          ← shows status immediately
+
+  ◉ #1 [running] add tests... (anthropic/claude-sonnet-4-6) 12s...
+  ◉ #2 [running] update README (ollama/llama3) 8s...
+  2 running, 0 done, 0 failed
+```
+
+**Manage tasks:**
+
+```
+/tasks              → status of all spawned agents
+/tasks results      → detailed results of completed tasks
+/tasks clear        → remove completed tasks from the list
+```
+
+- Each agent gets its own provider instance and tool access
+- Providers distributed via round-robin or manual selection
+- Auto-notifies in the chat when agents complete
+
 ### `/auto` — Autonomous Agent
 
 Runs a self-driving agent that works until the task is done — no manual intervention.
@@ -851,6 +980,8 @@ Supports stdio, HTTP, SSE. Tools auto-injected into all providers. Failed connec
 | `/exit` | Quit |
 | `/auto <task>` | Autonomous agent mode |
 | `/pipe <cmd>` | Feed shell output to AI (fix/watch) |
+| `/spawn` | Spawn parallel sub-agent (↑↓ or `/spawn <task>`) |
+| `/tasks` | List spawned agents (status/results/clear) |
 | `/verify` | Verify settings: reviewer provider/model/effort (↑↓) |
 | `/safety` | Configure safety guards (on/off) |
 
@@ -1014,6 +1145,8 @@ you  analyze this codebase
 20. **Agent Safety** — `/safety` 4-tier risk classification, destructive command blocking, auto git checkpoint
 21. **Skills upgrade** — Directory-based SKILL.md, $ARGUMENTS substitution, !`command` injection, extended frontmatter
 22. **Hooks upgrade** — Claude Code-style: matchers, JSON stdin, exit code blocking, settings.json config, 10 events
+23. **`/spawn` mode** — Parallel sub-agent spawning with provider/model selection, runs even while AI is thinking
+24. **`/tasks` dashboard** — Monitor, view results, and manage spawned agents
 
 ## License
 
