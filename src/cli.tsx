@@ -130,6 +130,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   });
   const [input, setInput] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
+  const cursorRef = React.useRef(0);
   const [isBusy, setIsBusy] = useState(false);
   const busyRef = React.useRef(false);
   const pendingRef = React.useRef<string[]>([]);
@@ -746,6 +747,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       const value = inputRef.current;
       if (!value.trim()) return;
       inputRef.current = "";
+      cursorRef.current = 0;
       setInput("");
       setCursorPos(0);
       submit(value);
@@ -754,41 +756,41 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
     // Left/Right arrow — move cursor within input
     if (key.leftArrow && !key.ctrl && !key.meta) {
-      setCursorPos((pos) => Math.max(0, pos - 1));
+      cursorRef.current = Math.max(0, cursorRef.current - 1);
+      setCursorPos(cursorRef.current);
       return;
     }
     if (key.rightArrow && !key.ctrl && !key.meta) {
-      setCursorPos((pos) => Math.min([...input].length, pos + 1));
+      cursorRef.current = Math.min([...inputRef.current].length, cursorRef.current + 1);
+      setCursorPos(cursorRef.current);
       return;
     }
 
     // Backspace — delete character before cursor
     if (key.backspace || key.delete) {
-      setInput((prev) => {
-        const chars = [...prev];
-        const pos = Math.min(chars.length, cursorPos);
-        if (pos <= 0) return prev;
-        chars.splice(pos - 1, 1);
-        const val = chars.join("");
-        inputRef.current = val;
-        return val;
-      });
-      setCursorPos((pos) => Math.max(0, pos - 1));
+      const chars = [...inputRef.current];
+      const pos = Math.min(chars.length, cursorRef.current);
+      if (pos <= 0) return;
+      chars.splice(pos - 1, 1);
+      const val = chars.join("");
+      inputRef.current = val;
+      cursorRef.current = pos - 1;
+      setInput(val);
+      setCursorPos(cursorRef.current);
       return;
     }
 
     // Regular character input (including Korean/CJK) — insert at cursor
     if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
-      setInput((prev) => {
-        const chars = [...prev];
-        const pos = Math.min(chars.length, cursorPos);
-        chars.splice(pos, 0, ch);
-        const next = chars.join("");
-        inputRef.current = next;
-        if (next.startsWith("/")) setSelectedIdx(0);
-        return next;
-      });
-      setCursorPos((pos) => pos + 1);
+      const chars = [...inputRef.current];
+      const pos = Math.min(chars.length, cursorRef.current);
+      chars.splice(pos, 0, ch);
+      const next = chars.join("");
+      inputRef.current = next;
+      cursorRef.current = pos + 1;
+      setInput(next);
+      setCursorPos(cursorRef.current);
+      if (next.startsWith("/")) setSelectedIdx(0);
     }
   });
 
@@ -817,6 +819,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     async (value: string, skipRender = false) => {
       const line = value.trim();
       setInput("");
+      cursorRef.current = 0;
+      setCursorPos(0);
 
       // ── MCP mode submit flow (before busy/empty check) ──
       if (mcpMode === "remove") {
