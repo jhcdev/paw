@@ -75,32 +75,8 @@ export class CodexProvider implements LlmProvider {
       let stdout = "";
       let stderr = "";
 
-      let capturing = false;
-      child.stdout.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        stdout += chunk;
-        if (onChunk) {
-          // Only stream content after the "codex" marker
-          if (capturing) {
-            onChunk(chunk);
-          } else if (chunk.includes("codex")) {
-            capturing = true;
-            const afterMarker = chunk.split("codex").slice(1).join("codex").replace(/^\n/, "");
-            if (afterMarker) onChunk(afterMarker);
-          }
-        }
-      });
-      child.stderr.on("data", (data: Buffer) => {
-        const chunk = data.toString();
-        stderr += chunk;
-        // Show stderr progress as streaming hint
-        if (onChunk) {
-          const trimmed = chunk.trim();
-          if (trimmed && !trimmed.startsWith("Warning")) {
-            onChunk(`[${trimmed}]\n`);
-          }
-        }
-      });
+      child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+      child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
 
       const timeout = setTimeout(() => {
         child.kill("SIGTERM");
