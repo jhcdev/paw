@@ -7,8 +7,8 @@
  * - When Ink writes (render start): move cursor down to Ink's expected
  *   position so eraseLines works correctly.
  * - When Ink finishes (SHOW_CURSOR): move cursor back up to IME position.
- * - Dynamically adjust offset: if rendered lines < terminal height,
- *   Ink cursor sits on an extra trailing line (+1 offset needed).
+ * - Track whether Ink's output ends with \n (cursor on new blank line)
+ *   to dynamically adjust the up-offset.
  */
 
 const HIDE_CURSOR = "\x1B[?25l";
@@ -28,6 +28,13 @@ function getRowOffset(): number {
   return 0;
 }
 
+/** Strip ANSI escape sequences to find the last printable character. */
+function lastPrintableChar(text: string): string {
+  // Remove all ANSI escape sequences: ESC[ ... final_byte  and  ESC (non-[) char
+  const stripped = text.replace(/\x1B\[[0-9;]*[A-Za-z]|\x1B[^[]/g, "");
+  return stripped.length > 0 ? stripped[stripped.length - 1] : "";
+}
+
 export class CursorManager {
   private originalStdoutWrite: typeof process.stdout.write | null = null;
   private originalStderrWrite: typeof process.stderr.write | null = null;
@@ -39,9 +46,9 @@ export class CursorManager {
   private stderrTail = "";
   /** true when cursor is currently at the IME position (moved up) */
   private atImePosition = false;
-  /** Count newlines in the current render cycle to estimate output height */
-  private renderNewlines = 0;
-  /** Whether the output doesn't fill the terminal (trailing blank line exists) */
+  /** Last printable character written in the current render cycle */
+  private lastPrintable = "";
+  /** Whether Ink's cursor sits on a trailing blank line after render */
   private hasTrailingLine = true;
 
   private canMoveToInput(): boolean {
@@ -53,7 +60,6 @@ export class CursorManager {
     return this.hasTrailingLine ? base + 1 : base;
   }
 
-  /** Move cursor from IME position back DOWN to where Ink expects it. */
   private cursorToInk(writer: typeof process.stdout.write): void {
     if (!this.atImePosition) return;
     const offset = this.getOffset();
@@ -61,7 +67,6 @@ export class CursorManager {
     this.atImePosition = false;
   }
 
-  /** Move cursor from Ink's bottom position UP to the IME input position. */
   private cursorToIme(writer: typeof process.stdout.write): void {
     if (this.atImePosition || !this.canMoveToInput()) return;
     const offset = this.getOffset();
@@ -101,27 +106,21 @@ export class CursorManager {
         chunk: string | Uint8Array,
         ...rest: any[]
       ): boolean {
-        // Before Ink writes, move cursor back down
         if (self.atImePosition) {
           self.cursorToInk(original);
         }
 
         const result = original(chunk, ...rest);
 
-        // Count newlines in this chunk for render height estimation
+        // Track last printable character for trailing-newline detection
         const text = chunkToString(chunk);
-        for (let i = 0; i < text.length; i++) {
-          if (text.charCodeAt(i) === 10) self.renderNewlines++;
-        }
+        const lpc = lastPrintableChar(text);
+        if (lpc) self.lastPrintable = lpc;
 
-        // After Ink finishes rendering (emits SHOW_CURSOR)
         if (self.detectShowCursor(stream, chunk)) {
-          // If rendered lines < terminal height, output doesn't fill screen
-          // → cursor is on a trailing blank line → need +1 offset
-          const termRows = process.stdout.rows || 24;
-          self.hasTrailingLine = self.renderNewlines < termRows;
-          self.renderNewlines = 0; // reset for next render cycle
-
+          // If Ink's last printable character was \n, cursor is on a blank line
+          self.hasTrailingLine = self.lastPrintable === "\n";
+          self.lastPrintable = "";
           self.cursorToIme(original);
         }
         return result;
