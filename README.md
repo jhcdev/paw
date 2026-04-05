@@ -101,6 +101,8 @@ Example:  anthropic → planner, reviewer, optimizer
 - **Message queue** — Type while AI is thinking; queued messages merge into one turn
 - **Autocomplete** — `/` triggers command list; Enter executes, Tab fills
 - **Security hardened** — Injection protection, SSRF blocking, symlink guards
+- **`/verify` mode** — Cross-provider code verification: AI generates, a different AI reviews
+- **`/safety` guards** — Risk classification for all tool calls; blocks destructive commands automatically
 - **`/auto` mode** — Autonomous agent: plan → execute → verify → fix loop until done
 - **`/pipe` mode** — Feed shell output to AI: analyze, auto-fix errors, or watch commands
 - **Smart Router** — Auto-detects best mode from your message (EN/KO/JA/ZH)
@@ -506,6 +508,60 @@ Pass — no errors
 FIXED after 3 iteration(s) (18.2s)
 ```
 
+### `/verify` — Trust Layer (Cross-Provider Verification)
+
+After AI generates code, a different provider automatically reviews the changes for bugs, security issues, and logic errors.
+
+```
+/verify              → Toggle auto-verify ON/OFF
+```
+
+When enabled, every turn that modifies files triggers a verification pass:
+
+```
+you  add user authentication endpoint
+=^.^= [writes src/auth.ts, edits src/routes.ts]
+
+---
+Verification (by ollama/qwen3):
+  Confidence: 85/100
+  warning: src/auth.ts — Potential SQL injection in query builder
+  info: src/routes.ts — Consider adding rate limiting
+---
+```
+
+- Uses a **different provider** than the one that generated code (e.g. Anthropic generates → Ollama reviews)
+- Falls back to same provider with a reviewer prompt if only one is available
+- Checks: N+1 queries, race conditions, security vulnerabilities, logic errors, missing error handling
+- Zero setup — just `/verify` to toggle
+
+### `/safety` — Agent Safety Guards
+
+Risk classification for every tool call. Blocks dangerous commands before they execute.
+
+```
+/safety              → Show current safety config
+/safety on           → Enable safety guards (default)
+/safety off          → Disable safety guards
+```
+
+Risk levels:
+
+| Level | Tools | Action |
+|-------|-------|--------|
+| **Low** | `list_files`, `read_file`, `glob`, `search_text`, `web_fetch` | Execute immediately |
+| **Medium** | `write_file`, `edit_file`, benign shell commands | Execute immediately |
+| **High** | `rm`, `git reset`, `docker rm`, `terraform destroy`, `kubectl delete`, `npm publish`... | Blocked with warning |
+| **Critical** | `rm -rf /`, `mkfs`, fork bombs, `curl\|sh`... | Blocked permanently |
+
+High-risk operations automatically create a git checkpoint (`git stash`) before execution when `autoCheckpoint` is enabled.
+
+```
+=^.^= [run_shell blocked]
+  ⚠️ High risk: "rm -rf dist/" matches destructive pattern.
+  Safety policy blocked this command. Run manually if intended.
+```
+
 ### Smart Router — Auto Mode Selection
 
 No need to remember commands. Just type naturally — Paw picks the best execution mode automatically.
@@ -589,6 +645,8 @@ Supports stdio, HTTP, SSE. Tools auto-injected into all providers. Failed connec
 | `/exit` | Quit |
 | `/auto <task>` | Autonomous agent mode |
 | `/pipe <cmd>` | Feed shell output to AI (fix/watch) |
+| `/verify` | Toggle cross-provider code verification |
+| `/safety` | Configure safety guards (on/off) |
 
 ### Keyboard
 
@@ -610,7 +668,10 @@ TEAM/gpt-5.4               turns: 2  mcp: off           local
 
 ## Security
 
-- **Shell**: dangerous patterns blocked (rm -rf /, mkfs, etc.)
+- **Safety system**: 4-tier risk classification (low/medium/high/critical) for all tool calls
+- **Shell**: 25+ dangerous patterns blocked (rm, git reset, terraform destroy, kubectl delete, etc.)
+- **Trust layer**: Cross-provider verification catches bugs before they land
+- **Auto-checkpoint**: Git stash before high-risk operations
 - **Search**: no shell injection (uses execFile, not shell)
 - **Files**: symlink traversal protection (realpath check)
 - **Web**: SSRF blocked (private IPs, metadata endpoints)
@@ -743,6 +804,8 @@ you  analyze this codebase
 16. **`/auto` mode** — Autonomous plan→execute→verify→fix agent loop
 17. **`/pipe` mode** — Shell output → AI analysis/fix/watch
 18. **Smart Router** — Auto-detect best mode from message content (multilingual)
+19. **Trust Layer** — `/verify` cross-provider code verification with confidence scoring
+20. **Agent Safety** — `/safety` 4-tier risk classification, destructive command blocking, auto git checkpoint
 
 ## License
 
