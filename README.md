@@ -98,6 +98,7 @@ Example:  anthropic → planner, reviewer, optimizer
 - **Live Ollama detection** — Shows actually pulled models with sizes
 - **Usage tracking** — Per-provider token count with estimated cost
 - **Korean IME** — Native stdin handling for smooth CJK input
+- **Message queue** — Type while AI is thinking; queued messages merge into one turn
 - **Autocomplete** — `/` triggers command list; Enter executes, Tab fills
 - **Security hardened** — Injection protection, SSRF blocking, symlink guards
 - **`/auto` mode** — Autonomous agent: plan → execute → verify → fix loop until done
@@ -113,10 +114,14 @@ Example:  anthropic → planner, reviewer, optimizer
 ## Installation
 
 ```bash
+# From source
 git clone https://github.com/jhcdev/paw.git
 cd paw
 npm install
 npm link    # Installs 'paw' command globally
+
+# Or install globally (npm)
+npm install -g paw
 ```
 
 ## Quick Start
@@ -236,24 +241,26 @@ you  /explain this function
 
 ### Custom Skills
 
-Create user-wide or project-scoped skills as JSON files:
+Create user-wide or project-scoped skills as Markdown files with frontmatter:
 
-**User skill** — `~/.paw/skills/deploy.json`:
-```json
-{
-  "name": "deploy",
-  "description": "Check deployment readiness",
-  "prompt": "Review this code for production deployment: check env vars, error handling, logging, and security."
-}
+**User skill** — `~/.paw/skills/deploy.md`:
+```md
+---
+name: deploy
+description: Check deployment readiness
+---
+
+Review this code for production deployment: check env vars, error handling, logging, and security.
 ```
 
-**Project skill** — `.paw/skills/style.json`:
-```json
-{
-  "name": "style",
-  "description": "Enforce project style guide",
-  "prompt": "Review this code against our style guide: 2-space indent, no var, prefer const, JSDoc on exports."
-}
+**Project skill** — `.paw/skills/style.md`:
+```md
+---
+name: style
+description: Enforce project style guide
+---
+
+Review this code against our style guide: 2-space indent, no var, prefer const, JSDoc on exports.
 ```
 
 Skills load automatically on startup. Use `/skills` to list all available skills.
@@ -276,34 +283,34 @@ Hooks let you run shell commands at specific points in the REPL lifecycle.
 
 ### Configuration
 
-Create `.paw/hooks.json` in your project (or `~/.paw/hooks.json` for user-wide hooks):
+Create Markdown files in `.paw/hooks/` (project) or `~/.paw/hooks/` (user-wide):
 
-```json
-{
-  "hooks": [
-    {
-      "name": "log-turns",
-      "event": "post-turn",
-      "command": "echo 'Turn complete' >> ~/.paw/activity.log"
-    },
-    {
-      "name": "lint-on-tool",
-      "event": "post-tool",
-      "command": "npm run lint --silent 2>/dev/null || true",
-      "timeout": 15000
-    },
-    {
-      "name": "notify-start",
-      "event": "session-start",
-      "command": "notify-send 'Cat\\'s Claw' 'Session started'"
-    },
-    {
-      "name": "git-status",
-      "event": "pre-turn",
-      "command": "git status --short"
-    }
-  ]
-}
+**`.paw/hooks/log-turns.md`**:
+```md
+---
+event: post-turn
+command: echo 'Turn complete' >> ~/.paw/activity.log
+name: log-turns
+---
+```
+
+**`.paw/hooks/lint-on-tool.md`**:
+```md
+---
+event: post-tool
+command: npm run lint --silent 2>/dev/null || true
+name: lint-on-tool
+timeout: 15000
+---
+```
+
+**`~/.paw/hooks/notify-start.md`**:
+```md
+---
+event: session-start
+command: notify-send 'Paw' 'Session started'
+name: notify-start
+---
 ```
 
 ### Context Variables
@@ -312,8 +319,8 @@ Hooks receive environment variables:
 
 | Variable | Value |
 |----------|-------|
-| `CATS_CLAW_EVENT` | The event name |
-| `CATS_CLAW_CWD` | Current working directory |
+| `PAW_EVENT` | The event name |
+| `PAW_CWD` | Current working directory |
 
 Use `{{key}}` placeholders in commands to interpolate context values. Hooks time out after 10s by default (configurable per hook via `timeout` in ms).
 
@@ -618,10 +625,10 @@ TEAM/gpt-5.4               turns: 2  mcp: off           local
 | `~/.paw/credentials.json` | API keys (0600) |
 | `~/.paw/sessions/*.json` | Session history (0600) |
 | `~/.paw/team-scores.json` | Team performance |
-| `~/.paw/skills/*.json` | User-wide custom skills |
-| `~/.paw/hooks.json` | User-wide hooks |
-| `.paw/skills/*.json` | Project-scoped custom skills |
-| `.paw/hooks.json` | Project-scoped hooks |
+| `~/.paw/skills/*.md` | User-wide custom skills |
+| `~/.paw/hooks/*.md` | User-wide hooks |
+| `.paw/skills/*.md` | Project-scoped custom skills |
+| `.paw/hooks/*.md` | Project-scoped hooks |
 | `.mcp.json` | MCP config |
 | `.env` | Environment (optional) |
 
@@ -663,13 +670,13 @@ you  /explain
 
 ### Hooks
 
-```bash
-# .paw/hooks.json
-{
-  "hooks": [
-    { "event": "post-tool", "command": "npm test --silent", "name": "auto-test" }
-  ]
-}
+```md
+# .paw/hooks/auto-test.md
+---
+event: post-tool
+command: npm test --silent
+name: auto-test
+---
 # → tests run automatically after every tool call
 ```
 
