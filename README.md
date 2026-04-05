@@ -730,13 +730,12 @@ you  analyze this codebase
 10. **Korean IME** — Native stdin handling, smooth CJK input
 11. **Security audit** — 14 vulnerabilities fixed (injection, SSRF, symlink, permissions)
 12. **`paw` CLI** — 3-character global command
-13. **Anthropic removed** — Moved to separate plugin [jhcdev/paw-anthropic](https://github.com/jhcdev/paw-anthropic)
-14. **Skills system** — 7 built-in skills + user/project custom skills via JSON files
-15. **Hooks system** — Event-driven automation with 7 lifecycle events and shell command execution
-16. **Anthropic provider** — API key mode with per-token pricing
-17. **`/auto` mode** — Autonomous plan→execute→verify→fix agent loop
-18. **`/pipe` mode** — Shell output → AI analysis/fix/watch
-19. **Smart Router** — Auto-detect best mode from message content (multilingual)
+13. **Skills system** — 7 built-in skills + user/project custom skills via Markdown files
+14. **Hooks system** — Event-driven automation with 7 lifecycle events via Markdown config
+15. **Anthropic provider** — API key mode with per-token pricing
+16. **`/auto` mode** — Autonomous plan→execute→verify→fix agent loop
+17. **`/pipe` mode** — Shell output → AI analysis/fix/watch
+18. **Smart Router** — Auto-detect best mode from message content (multilingual)
 
 ## License
 
