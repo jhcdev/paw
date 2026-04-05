@@ -39,6 +39,7 @@ export class CodingAgent {
     this.hooks = new HookManager(args.cwd);
     this.detectedProviders = args.detected;
     this.verifier = new Verifier(this.multi, args.provider, args.cwd);
+    this.wireToolHooks();
   }
 
   async initTeam(): Promise<void> {
@@ -91,7 +92,10 @@ export class CodingAgent {
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
-    await this.hooks.run("pre-turn", { prompt }).catch(() => {});
+    const preResults = await this.hooks.run("pre-turn", { prompt }).catch(() => []);
+    // Collect additionalContext from hooks and prepend to prompt
+    const hookContext = preResults.filter(r => r.additionalContext).map(r => r.additionalContext).join("\n");
+    if (hookContext) prompt = hookContext + "\n\n" + prompt;
     const actId = this.activityLog.start("agent", "thinking", prompt.slice(0, 50));
     this.activityLog.log(actId, "prompt", prompt);
     try {
@@ -99,7 +103,7 @@ export class CodingAgent {
       this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
       this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
       this.tracker.record(this.currentProvider, this.currentModel, result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0);
-      await this.hooks.run("post-turn", { response: result.text }).catch(() => {});
+      await this.hooks.run("post-turn", { response: result.text }).catch(() => []);
       this.activityLog.log(actId, "response", result.text);
       this.activityLog.finish(actId, result.text.slice(0, 100));
 
@@ -128,7 +132,7 @@ export class CodingAgent {
       return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await this.hooks.run("on-error", { error: msg }).catch(() => {});
+      await this.hooks.run("on-error", { error: msg }).catch(() => []);
       this.activityLog.fail(actId, msg);
       const lower = msg.toLowerCase();
       const isRetryable = lower.includes("rate limit") || lower.includes("429") ||
@@ -250,7 +254,37 @@ export class CodingAgent {
       }
     }
 
+    this.wireToolHooks();
     return { ok: true };
+  }
+
+  private wireToolHooks(): void {
+    if ("setToolHooks" in this.provider && typeof (this.provider as any).setToolHooks === "function") {
+      (this.provider as any).setToolHooks({
+        preTool: async (toolName: string, input: Record<string, unknown>) => {
+          const results = await this.hooks.run("pre-tool", { tool_name: toolName, tool_input: input }, toolName).catch(() => []);
+          const blocked = results.some(r => r.blocked);
+          const reason = results.find(r => r.blocked)?.stderr || "Blocked by hook";
+          const additionalContext = results.filter(r => r.additionalContext).map(r => r.additionalContext).join("\n") || undefined;
+          return { blocked, reason, additionalContext };
+        },
+        postTool: async (toolName: string, input: Record<string, unknown>, result: { content: string; isError?: boolean }) => {
+          const results = await this.hooks.run("post-tool", { tool_name: toolName, tool_input: input, tool_result: result }, toolName).catch(() => []);
+          const additionalContext = results.filter(r => r.additionalContext).map(r => r.additionalContext).join("\n") || undefined;
+          return { additionalContext };
+        },
+        postToolFailure: async (toolName: string, input: Record<string, unknown>, error: string) => {
+          await this.hooks.run("post-tool-failure", { tool_name: toolName, tool_input: input, error }, toolName).catch(() => []);
+        },
+      });
+    }
+  }
+
+  async runStopHook(): Promise<{ blocked: boolean; reason?: string }> {
+    const results = await this.hooks.run("stop", {}).catch(() => []);
+    const blocked = results.some(r => r.blocked);
+    const reason = results.find(r => r.blocked)?.stderr;
+    return { blocked, reason };
   }
 
   getProviderKeys(): Map<string, { apiKey: string; baseUrl?: string }> {

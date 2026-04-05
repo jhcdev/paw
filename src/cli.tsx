@@ -1055,9 +1055,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (line === "/hooks") {
         const hooks = agent.getHooks().listHooks();
         if (hooks.length === 0) {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No hooks configured.\n\nAdd hooks to .paw/hooks.json:\n{\n  \"hooks\": [\n    { \"event\": \"pre-turn\", \"command\": \"echo preprocessing...\", \"name\": \"my-hook\" }\n  ]\n}" }]);
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No hooks configured.\n\nAdd hooks to .paw/hooks/*.md or .paw/settings.json" }]);
         } else {
-          const list = hooks.map((h) => `  ${h.event}: ${h.name ?? h.command}`).join("\n");
+          const list = hooks.map((h) => {
+            const parts = [`  ${h.event}`];
+            if (h.matcher) parts.push(`[matcher: ${h.matcher}]`);
+            parts.push(`→ ${h.name ?? h.command}`);
+            if (h.source) parts.push(`(${h.source})`);
+            return parts.join(" ");
+          }).join("\n");
           setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Hooks (${hooks.length}):\n${list}` }]);
         }
         return;
@@ -1273,6 +1279,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const result = await agent.runTurn(line);
           setTurnCount((c) => c + 1);
           setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
+          const stopResult = await agent.runStopHook();
+          if (stopResult.blocked && stopResult.reason) {
+            setEntries(c => [...c, { role: "system", text: `Hook feedback: ${stopResult.reason}` }]);
+          }
         }
       } catch (error) {
         setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
@@ -1893,10 +1903,12 @@ function openTtyStdin(): tty.ReadStream | undefined {
 }
 
 export async function startRepl(agent: CodingAgent, options: StartReplOptions): Promise<void> {
+  agent.getHooks().run("session-start", { source: "startup" }).catch(() => []);
   const ttyStdin = openTtyStdin();
   const instance = render(<App agent={agent} options={options} />, {
     ...(ttyStdin ? { stdin: ttyStdin } : {}),
   });
   await instance.waitUntilExit();
   ttyStdin?.destroy();
+  agent.getHooks().run("session-end", { source: "exit" }).catch(() => []);
 }

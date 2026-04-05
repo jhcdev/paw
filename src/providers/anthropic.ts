@@ -6,6 +6,12 @@ import type { SafetyConfig } from "../safety.js";
 
 const SYSTEM_PROMPT = `You are Paw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
 
+export type ToolHookCallback = {
+  preTool?: (toolName: string, input: Record<string, unknown>) => Promise<{ blocked: boolean; reason?: string; additionalContext?: string }>;
+  postTool?: (toolName: string, input: Record<string, unknown>, result: { content: string; isError?: boolean }) => Promise<{ additionalContext?: string }>;
+  postToolFailure?: (toolName: string, input: Record<string, unknown>, error: string) => Promise<void>;
+};
+
 export class AnthropicProvider implements LlmProvider {
   private readonly client: Anthropic;
   private readonly model: string;
@@ -14,6 +20,7 @@ export class AnthropicProvider implements LlmProvider {
   private extraTools: ToolDefinition[] = [];
   private extraHandlers: Record<string, ToolHandler> = {};
   private safetyConfig: SafetyConfig = { enabled: true, autoCheckpoint: true, blockCritical: true };
+  private toolHooks: ToolHookCallback = {};
 
   constructor(args: { apiKey: string; model: string; cwd: string }) {
     this.client = new Anthropic({ apiKey: args.apiKey });
@@ -28,6 +35,10 @@ export class AnthropicProvider implements LlmProvider {
 
   setSafetyConfig(config: SafetyConfig): void {
     this.safetyConfig = config;
+  }
+
+  setToolHooks(hooks: ToolHookCallback): void {
+    this.toolHooks = hooks;
   }
 
   clear(): void { this.messages.length = 0; }
@@ -58,14 +69,38 @@ export class AnthropicProvider implements LlmProvider {
       const toolResults: ToolResultBlockParam[] = [];
       for (const toolUse of toolUses) {
         const handler = allHandlers[toolUse.name];
-        if (!handler) { toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, is_error: true, content: `Unknown tool: ${toolUse.name}` }); continue; }
+        if (!handler) {
+          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, is_error: true, content: `Unknown tool: ${toolUse.name}` });
+          continue;
+        }
+
+        // Pre-tool hook
+        if (this.toolHooks?.preTool) {
+          const hookResult = await this.toolHooks.preTool(toolUse.name, toolUse.input as Record<string, unknown>);
+          if (hookResult.blocked) {
+            toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, is_error: true, content: hookResult.reason ?? "Blocked by hook" });
+            continue;
+          }
+        }
+
         try {
           const result = await handler(toolUse.input as Record<string, unknown>, this.cwd);
           const tr: ToolResultBlockParam = { type: "tool_result", tool_use_id: toolUse.id, content: result.content };
           if (result.isError) tr.is_error = true;
           toolResults.push(tr);
+
+          // Post-tool hook
+          if (this.toolHooks?.postTool) {
+            await this.toolHooks.postTool(toolUse.name, toolUse.input as Record<string, unknown>, result);
+          }
         } catch (error) {
-          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, is_error: true, content: error instanceof Error ? error.message : String(error) });
+          const errMsg = error instanceof Error ? error.message : String(error);
+          toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, is_error: true, content: errMsg });
+
+          // Post-tool failure hook
+          if (this.toolHooks?.postToolFailure) {
+            await this.toolHooks.postToolFailure(toolUse.name, toolUse.input as Record<string, unknown>, errMsg);
+          }
         }
       }
       this.messages.push({ role: "user", content: toolResults });
