@@ -79,6 +79,7 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/mcp", desc: "MCP server manager" },
   { name: "/git", desc: "git status, diff, log" },
   { name: "/history", desc: "export conversation" },
+  { name: "/export", desc: "export full context as markdown" },
   { name: "/compact", desc: "compress conversation" },
   { name: "/init", desc: "generate project context" },
   { name: "/doctor", desc: "diagnostics" },
@@ -172,6 +173,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [verifyPanelModels, setVerifyPanelModels] = useState<{ id: string; name: string }[]>([]);
   const [verifyCursor, setVerifyCursor] = useState(0);
   const [skillsCache, setSkillsCache] = useState<import("./skills.js").Skill[]>([]);
+  const spawnResultsRef = React.useRef<string[]>([]);
   const [spawnManager] = useState(() => {
     const mgr = new SpawnManager(options.cwd, (task) => {
       if (task.status === "done" || task.status === "failed") {
@@ -183,6 +185,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             text: `${icon} Agent #${task.id} ${task.status}: ${task.goal.slice(0, 60)}${task.result ? "\n" + task.result.split("\n").slice(0, 3).join("\n") : ""}${task.error ? "\nError: " + task.error : ""}`,
           },
         ]);
+        // Queue result for auto-injection into next turn
+        if (task.status === "done" && task.result) {
+          spawnResultsRef.current.push(`[Agent #${task.id} completed: ${task.goal}]\n${task.result.slice(0, 500)}`);
+        }
       }
     }, () => {
       // Always returns the current active provider/model at spawn time
@@ -1048,6 +1054,59 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+      // ── export (structured context summary as markdown) ──
+      if (line === "/export") {
+        const exportPath = path.join(options.cwd, `paw-export-${Date.now()}.md`);
+        const { sources } = await loadMemory(options.cwd);
+        const sections: string[] = [
+          `# Paw Session Export`,
+          `> ${new Date().toISOString()} | ${agent.getActiveProvider()}/${agent.getActiveModel()} | ${entries.length} entries`,
+          "",
+        ];
+
+        // Memory sources
+        if (sources.length > 0) {
+          sections.push("## Memory & Instructions\n");
+          for (const s of sources) {
+            sections.push(`### ${s.level} (${s.path})\n\n${s.content}\n`);
+          }
+        }
+
+        // Conversation
+        sections.push("## Conversation\n");
+        for (const e of entries) {
+          if (e.role === "user") sections.push(`### > ${e.text}\n`);
+          else if (e.role === "assistant") sections.push(`${e.text}\n`);
+          else sections.push(`*${e.text}*\n`);
+        }
+
+        // Spawn results
+        const completed = spawnManager.getCompletedTasks();
+        if (completed.length > 0) {
+          sections.push("## Sub-Agent Results\n");
+          for (const t of completed) {
+            sections.push(`### Agent #${t.id}: ${t.goal}\n\n**Provider:** ${t.provider}/${t.model} | **Status:** ${t.status}\n\n${t.result ?? t.error ?? "(no output)"}\n`);
+          }
+        }
+
+        // Usage
+        sections.push(`## Usage\n\n${agent.tracker.formatReport()}\n`);
+
+        try {
+          await fsPromises.writeFile(exportPath, sections.join("\n"), "utf8");
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: `Exported to ${path.basename(exportPath)}` },
+          ]);
+        } catch (err) {
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: `Export failed: ${err instanceof Error ? err.message : String(err)}` },
+          ]);
+        }
+        return;
+      }
+
       // ── compact ──
       if (line === "/compact") {
         agent.clear();
@@ -1482,6 +1541,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       setIsBusy(true);
 
       try {
+        // Inject completed spawn results into the prompt
+        let enrichedLine = line;
+        if (spawnResultsRef.current.length > 0) {
+          const spawnContext = spawnResultsRef.current.join("\n\n");
+          spawnResultsRef.current = [];
+          enrichedLine = `${line}\n\n[Completed sub-agent work — incorporate if relevant]\n${spawnContext}`;
+        }
+
         const hasMulti = agent.getMulti().getRegistered().length > 1;
         const route = routeMessage(line, mode === "team", hasMulti);
 
@@ -1491,7 +1558,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
             setThinkMsg(`${icon} ${step.description}`);
           });
-          const result = await auto.run(line);
+          const result = await auto.run(enrichedLine);
           setTurnCount((c) => c + 1);
           const output = result.steps
             .filter((s) => s.action === "done" && s.result)
@@ -1516,13 +1583,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           } else {
             // Skill not found, fall through to solo
             setThinkMsg(randomCatMood());
-            const result = await agent.runTurn(line);
+            const result = await agent.runTurn(enrichedLine);
             setTurnCount((c) => c + 1);
             setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty)" }]);
           }
         } else if (route.mode === "team" && agent.getTeam().isReady()) {
           let currentPhaseId: string | null = null;
-          const result = await agent.getTeam().run(line, (phase, provider, mdl) => {
+          const result = await agent.getTeam().run(enrichedLine, (phase, provider, mdl) => {
             if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
             currentPhaseId = agent.activityLog.start("agent", `${phase}`, `${provider}/${mdl}`);
             setThinkMsg(`${phase} (${provider}/${mdl})...`);
@@ -1536,7 +1603,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         } else {
           // Solo mode
           setThinkMsg(randomCatMood());
-          const result = await agent.runTurn(line);
+          const result = await agent.runTurn(enrichedLine);
           setTurnCount((c) => c + 1);
           setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
           const stopResult = await agent.runStopHook();
