@@ -14,7 +14,7 @@ import { toolDefinitions } from "./tools.js";
 import type { ProviderName } from "./types.js";
 import { formatModelList, getAllFilteredModels, resolveModelByIndex, detectPlan } from "./model-catalog.js";
 import { routeMessage } from "./smart-router.js";
-import { loadSkills, formatSkillList } from "./skills.js";
+import { loadSkills, formatSkillList, renderSkill } from "./skills.js";
 import { AutoAgent } from "./auto-agent.js";
 import { PipeAgent } from "./pipe-agent.js";
 
@@ -139,6 +139,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [verifyPanelProvider, setVerifyPanelProvider] = useState<string>("");
   const [verifyPanelModels, setVerifyPanelModels] = useState<{ id: string; name: string }[]>([]);
   const [verifyCursor, setVerifyCursor] = useState(0);
+  const [skillsCache, setSkillsCache] = useState<import("./skills.js").Skill[]>([]);
+
+  // Pre-load skills for autocomplete
+  React.useEffect(() => {
+    loadSkills(options.cwd).then(setSkillsCache).catch(() => {});
+  }, [options.cwd]);
 
   // All input handled in useInput below (no separate useStdin)
 
@@ -182,8 +188,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ")) return [];
     const q = input.toLowerCase();
-    return COMMANDS.filter((c) => c.name.startsWith(q));
-  }, [input]);
+    const cmdMatches = COMMANDS.filter((c) => c.name.startsWith(q));
+    const skillMatches = skillsCache
+      .filter((s) => s.userInvocable !== false)
+      .filter((s) => `/${s.name}`.startsWith(q))
+      .filter((s) => !COMMANDS.some((c) => c.name === `/${s.name}`))
+      .map((s) => ({
+        name: `/${s.name}`,
+        desc: s.argumentHint ? `${s.description} [${s.argumentHint}]` : s.description,
+      }));
+    return [...cmdMatches, ...skillMatches];
+  }, [input, skillsCache]);
 
   useInput((ch, key) => {
     if (key.ctrl && ch === "c") {
@@ -1158,18 +1173,20 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       // ── unknown command / skill ──
       if (line.startsWith("/")) {
         const skillName = line.slice(1).split(/\s+/)[0]!;
-        const skillContext = line.slice(1 + skillName.length).trim();
+        const skillArgs = line.slice(1 + skillName.length).trim();
         const skills = await loadSkills(options.cwd);
         const skill = skills.find((s) => s.name === skillName);
         if (skill) {
-          const fullPrompt = skillContext ? `${skill.prompt}\n\nContext:\n${skillContext}` : skill.prompt;
+          const fullPrompt = await renderSkill(skill, skillArgs, options.cwd);
           setEntries((c) => [...c, { role: "user", text: line }]);
           setIsBusy(true);
           setThinkMsg(`running /${skillName}...`);
           try {
-            const result = await agent.runTurn(fullPrompt);
-            setTurnCount((c) => c + 1);
-            setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
+            if (!skill.disableModelInvocation) {
+              const result = await agent.runTurn(fullPrompt);
+              setTurnCount((c) => c + 1);
+              setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
+            }
           } catch (error) {
             setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
           } finally {
@@ -1247,9 +1264,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         } else if (route.mode === "skill") {
           const skills = await loadSkills(options.cwd);
           const skill = skills.find((s) => s.name === route.skillName);
-          if (skill) {
+          if (skill && !skill.disableModelInvocation) {
             setThinkMsg(`skill: /${route.skillName}`);
-            const fullPrompt = `${skill.prompt}\n\nContext:\n${route.context}`;
+            const fullPrompt = await renderSkill(skill, route.context, options.cwd);
             const result = await agent.runTurn(fullPrompt);
             setTurnCount((c) => c + 1);
             setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty)" }]);

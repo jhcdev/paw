@@ -1,12 +1,19 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { exec } from "node:child_process";
 
 export type Skill = {
   name: string;
   description: string;
   prompt: string;
   source: "builtin" | "user" | "project";
+  argumentHint?: string;
+  disableModelInvocation?: boolean;
+  userInvocable?: boolean;
+  allowedTools?: string[];
+  context?: "fork";
+  skillDir?: string;
 };
 
 const SKILLS_DIR = path.join(os.homedir(), ".paw", "skills");
@@ -76,44 +83,134 @@ function toFrontmatter(meta: Record<string, string>, body: string): string {
   return `---\n${lines.join("\n")}\n---\n\n${body}\n`;
 }
 
+function buildSkillFromMeta(
+  meta: Record<string, string>,
+  body: string,
+  source: "user" | "project",
+  skillDir?: string,
+): Skill | null {
+  if (!meta.name || !body) return null;
+
+  const skill: Skill = {
+    name: meta.name,
+    description: meta.description ?? "",
+    prompt: body,
+    source,
+  };
+
+  // Parse extended frontmatter (hyphenated YAML keys -> camelCase)
+  if (meta["argument-hint"]) skill.argumentHint = meta["argument-hint"];
+  if (meta["disable-model-invocation"] !== undefined) {
+    skill.disableModelInvocation = meta["disable-model-invocation"] === "true";
+  }
+  if (meta["user-invocable"] !== undefined) {
+    skill.userInvocable = meta["user-invocable"] === "true";
+  }
+  if (meta["allowed-tools"]) {
+    skill.allowedTools = meta["allowed-tools"].split(/\s+/).filter(Boolean);
+  }
+  if (meta.context === "fork") skill.context = "fork";
+  if (skillDir) skill.skillDir = skillDir;
+
+  return skill;
+}
+
 async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
 }
 
 async function loadSkillsFromDir(dir: string, source: "user" | "project"): Promise<Skill[]> {
   const skills: Skill[] = [];
+  let entries: string[];
   try {
-    const files = await fs.readdir(dir);
-    for (const file of files) {
-      if (!file.endsWith(".md")) continue;
-      try {
-        const raw = await fs.readFile(path.join(dir, file), "utf8");
+    entries = await fs.readdir(dir);
+  } catch {
+    return skills;
+  }
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry);
+    try {
+      const stat = await fs.stat(fullPath);
+
+      if (stat.isDirectory()) {
+        // Directory-based skill: skills/name/SKILL.md
+        const skillMdPath = path.join(fullPath, "SKILL.md");
+        try {
+          const raw = await fs.readFile(skillMdPath, "utf8");
+          const { meta, body } = parseFrontmatter(raw);
+          const skill = buildSkillFromMeta(meta, body, source, fullPath);
+          if (skill) skills.push(skill);
+        } catch { continue; }
+      } else if (entry.endsWith(".md")) {
+        // Flat file skill: skills/name.md (backward compatible)
+        const raw = await fs.readFile(fullPath, "utf8");
         const { meta, body } = parseFrontmatter(raw);
-        if (meta.name && body) {
-          skills.push({
-            name: meta.name,
-            description: meta.description ?? "",
-            prompt: body,
-            source,
-          });
-        }
-      } catch { continue; }
-    }
-  } catch {}
+        const skill = buildSkillFromMeta(meta, body, source);
+        if (skill) skills.push(skill);
+      }
+    } catch { continue; }
+  }
+
   return skills;
 }
 
 export async function loadSkills(cwd: string): Promise<Skill[]> {
   const skills = [...BUILTIN_SKILLS];
 
-  // Load user skills from ~/.paw/skills/*.md
+  // Load user skills from ~/.paw/skills/
   await ensureDir(SKILLS_DIR);
   skills.push(...await loadSkillsFromDir(SKILLS_DIR, "user"));
 
-  // Load project skills from .paw/skills/*.md
+  // Load project skills from .paw/skills/
   skills.push(...await loadSkillsFromDir(path.join(cwd, PROJECT_SKILLS_DIR), "project"));
 
   return skills;
+}
+
+function execCommand(command: string, cwd: string, timeoutMs: number): Promise<string> {
+  return new Promise((resolve) => {
+    exec(command, { cwd, timeout: timeoutMs }, (error, stdout) => {
+      if (error) {
+        resolve(`(command failed: ${error.message})`);
+      } else {
+        resolve(String(stdout));
+      }
+    });
+  });
+}
+
+export async function renderSkill(skill: Skill, args: string, cwd: string): Promise<string> {
+  let prompt = skill.prompt;
+
+  // 1. $ARGUMENTS substitution
+  const argParts = args.trim() ? args.trim().split(/\s+/) : [];
+  const hasArgumentsRef = /\$ARGUMENTS|\$\d+/.test(prompt);
+
+  // Replace indexed forms: $ARGUMENTS[N] then $N shorthand
+  prompt = prompt.replace(/\$ARGUMENTS\[(\d+)\]/g, (_, idx) => argParts[Number(idx)] ?? "");
+  prompt = prompt.replace(/\$(\d+)/g, (_, idx) => argParts[Number(idx)] ?? "");
+  // Replace full $ARGUMENTS
+  prompt = prompt.replace(/\$ARGUMENTS/g, args);
+
+  // If no $ARGUMENTS/$N reference existed and args provided, append
+  if (!hasArgumentsRef && args.trim()) {
+    prompt += `\n\nARGUMENTS: ${args}`;
+  }
+
+  // 2. !`command` dynamic injection
+  const cmdPattern = /!`([^`]+)`/g;
+  const cmdMatches = [...prompt.matchAll(cmdPattern)];
+  for (const m of cmdMatches) {
+    const result = await execCommand(m[1]!, cwd, 10000);
+    prompt = prompt.replace(m[0], result.trimEnd());
+  }
+
+  // 3. ${CLAUDE_SKILL_DIR} substitution
+  const skillDir = skill.skillDir ?? cwd;
+  prompt = prompt.replace(/\$\{CLAUDE_SKILL_DIR\}/g, skillDir);
+
+  return prompt;
 }
 
 export async function saveSkill(skill: Omit<Skill, "source">, scope: "user" | "project", cwd: string): Promise<void> {
@@ -138,18 +235,24 @@ export function formatSkillList(skills: Skill[]): string {
   const grouped: Record<string, Skill[]> = { builtin: [], user: [], project: [] };
   for (const s of skills) (grouped[s.source] ?? []).push(s);
 
+  const formatEntry = (s: Skill): string => {
+    const hint = s.argumentHint ? ` ${s.argumentHint}` : "";
+    const flags = s.disableModelInvocation ? " (user-only)" : "";
+    return `  /${s.name}${hint} — ${s.description}${flags}`;
+  };
+
   const lines: string[] = [];
   if (grouped.builtin.length) {
     lines.push("Built-in:");
-    for (const s of grouped.builtin) lines.push(`  /${s.name} — ${s.description}`);
+    for (const s of grouped.builtin) lines.push(formatEntry(s));
   }
   if (grouped.user.length) {
     lines.push("\nUser (~/.paw/skills/):");
-    for (const s of grouped.user) lines.push(`  /${s.name} — ${s.description}`);
+    for (const s of grouped.user) lines.push(formatEntry(s));
   }
   if (grouped.project.length) {
     lines.push("\nProject (.paw/skills/):");
-    for (const s of grouped.project) lines.push(`  /${s.name} — ${s.description}`);
+    for (const s of grouped.project) lines.push(formatEntry(s));
   }
   return lines.join("\n");
 }
