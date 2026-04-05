@@ -92,8 +92,8 @@ Example:  anthropic → planner, reviewer, optimizer
 - **Arrow-key UI** — All panels: ↑↓ navigate, Enter select, Esc back
 - **Effort levels** — Codex: low/medium/high/max (configurable per model and per team role)
 - **MCP support** — External tools via Model Context Protocol (stdio/http/sse)
-- **Skills** — 7 built-in slash commands + user/project custom skills
-- **Hooks** — Event-driven automation: pre-turn, post-turn, pre-tool, post-tool, on-error, session-start, session-end
+- **Skills** — 7 built-in + custom skills with $ARGUMENTS, !`command` injection, directory-based SKILL.md
+- **Hooks** — 10 lifecycle events, regex matchers, JSON stdin, exit 2 = block, settings.json + markdown config
 - **Auto-fallback** — Rate limit? Instantly tries next provider
 - **Live Ollama detection** — Shows actually pulled models with sizes
 - **Usage tracking** — Per-provider token count with estimated cost
@@ -219,7 +219,7 @@ Stored in `~/.paw/sessions/{id}.json` (mode 0600).
 
 ## Skills
 
-Skills are slash commands that prepend a focused prompt to your message.
+Skills extend what Paw can do. Create a `SKILL.md` with instructions and Paw adds it to its capabilities.
 
 ### Built-in Skills (7)
 
@@ -239,64 +239,143 @@ Skills are slash commands that prepend a focused prompt to your message.
 you  /review src/auth.ts
 you  /commit
 you  /explain this function
+you  /fix-issue 123              ← arguments passed via $ARGUMENTS
+you  /migrate-component SearchBar React Vue  ← indexed args via $0, $1, $2
 ```
 
 ### Custom Skills
 
-Create user-wide or project-scoped skills as Markdown files with frontmatter:
+Skills support two formats: **flat files** and **directory-based** (with supporting files).
 
-**User skill** — `~/.paw/skills/deploy.md`:
+#### Flat file — `.paw/skills/deploy.md`:
+
 ```md
 ---
 name: deploy
-description: Check deployment readiness
+description: Deploy the application
+argument-hint: [environment]
+disable-model-invocation: true
 ---
 
-Review this code for production deployment: check env vars, error handling, logging, and security.
+Deploy $ARGUMENTS to production:
+1. Run the test suite
+2. Build the application
+3. Push to the deployment target
 ```
 
-**Project skill** — `.paw/skills/style.md`:
+#### Directory-based — `.paw/skills/explain-code/SKILL.md`:
+
+```
+explain-code/
+├── SKILL.md           # Main instructions (required)
+├── template.md        # Template for Paw to fill
+├── examples/
+│   └── sample.md      # Example output
+└── scripts/
+    └── visualize.py   # Script Paw can run
+```
+
 ```md
 ---
-name: style
-description: Enforce project style guide
+name: explain-code
+description: Explains code with visual diagrams and analogies
 ---
 
-Review this code against our style guide: 2-space indent, no var, prefer const, JSDoc on exports.
+When explaining code, always include:
+1. **Start with an analogy**: Compare to everyday life
+2. **Draw a diagram**: Use ASCII art to show flow
+3. **Walk through the code**: Step-by-step explanation
+
+For detailed reference, see [template.md](template.md).
+Run: !`python ${CLAUDE_SKILL_DIR}/scripts/visualize.py`
+```
+
+### Skill Locations
+
+| Location | Path | Applies to |
+|----------|------|-----------|
+| Personal | `~/.paw/skills/<name>/SKILL.md` or `~/.paw/skills/<name>.md` | All projects |
+| Project | `.paw/skills/<name>/SKILL.md` or `.paw/skills/<name>.md` | This project only |
+
+### Frontmatter Reference
+
+```yaml
+---
+name: my-skill
+description: What this skill does
+argument-hint: [issue-number]
+disable-model-invocation: true
+user-invocable: true
+allowed-tools: Bash Read
+context: fork
+---
+```
+
+| Field | Description |
+|-------|-------------|
+| `name` | Skill name (becomes `/name` command) |
+| `description` | When to use this skill (shown in autocomplete) |
+| `argument-hint` | Hint shown in autocomplete (e.g. `[env]`) |
+| `disable-model-invocation` | `true` = user-only, AI won't auto-invoke |
+| `user-invocable` | `false` = hidden from `/` menu, AI-only |
+| `allowed-tools` | Tools auto-approved when skill is active |
+| `context` | `fork` = run in isolated subagent |
+
+### Dynamic Features
+
+**`$ARGUMENTS` substitution** — arguments passed after the skill name:
+
+```md
+Fix GitHub issue $ARGUMENTS following our coding standards.
+Migrate $0 component from $1 to $2.
+```
+
+- `$ARGUMENTS` → full args string
+- `$ARGUMENTS[0]`, `$0` → first argument
+- `$ARGUMENTS[1]`, `$1` → second argument
+- If no `$ARGUMENTS` in prompt, args are appended automatically
+
+**`` !`command` `` dynamic injection** — shell commands executed before sending to AI:
+
+```md
+## Context
+- Current branch: !`git branch --show-current`
+- Recent commits: !`git log --oneline -5`
+- PR diff: !`gh pr diff`
+```
+
+**`${CLAUDE_SKILL_DIR}`** — resolves to the skill's directory path:
+
+```md
+Run the helper script:
+!`python ${CLAUDE_SKILL_DIR}/scripts/analyze.py`
 ```
 
 Skills load automatically on startup. Use `/skills` to list all available skills.
 
 ## Hooks
 
-Hooks let you run shell commands at specific points in the REPL lifecycle.
+Hooks run shell commands at specific points in the REPL lifecycle. They receive event data via JSON stdin and can block actions via exit codes.
 
 ### Events
 
-| Event | When |
-|-------|------|
-| `pre-turn` | Before sending a message to the model |
-| `post-turn` | After the model responds |
-| `pre-tool` | Before a tool is executed |
-| `post-tool` | After a tool finishes |
-| `on-error` | When any error occurs |
-| `session-start` | When the REPL session starts |
-| `session-end` | When the REPL session ends |
+| Event | When | Matcher filters |
+|-------|------|----------------|
+| `pre-turn` | Before sending to the model | — |
+| `post-turn` | After model responds | — |
+| `pre-tool` | Before tool execution (can block) | Tool name |
+| `post-tool` | After tool succeeds | Tool name |
+| `post-tool-failure` | After tool fails | Tool name |
+| `on-error` | When any error occurs | — |
+| `session-start` | REPL session starts | Source |
+| `session-end` | REPL session ends | Source |
+| `stop` | After AI finishes responding (can block to continue) | — |
+| `notification` | When a notification is sent | — |
 
-### Configuration
+### Configuration — Two formats
 
-Create Markdown files in `.paw/hooks/` (project) or `~/.paw/hooks/` (user-wide):
+#### Markdown files (`.paw/hooks/*.md`):
 
-**`.paw/hooks/log-turns.md`**:
-```md
----
-event: post-turn
-command: echo 'Turn complete' >> ~/.paw/activity.log
-name: log-turns
----
-```
-
-**`.paw/hooks/lint-on-tool.md`**:
 ```md
 ---
 event: post-tool
@@ -306,25 +385,120 @@ timeout: 15000
 ---
 ```
 
-**`~/.paw/hooks/notify-start.md`**:
-```md
----
-event: session-start
-command: notify-send 'Paw' 'Session started'
-name: notify-start
----
+#### JSON settings (`.paw/settings.json`):
+
+```json
+{
+  "hooks": {
+    "pre-tool": [
+      {
+        "matcher": "run_shell",
+        "hooks": [
+          { "type": "command", "command": ".paw/hooks/validate-shell.sh" }
+        ]
+      }
+    ],
+    "post-tool": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          { "type": "command", "command": "npx prettier --write $(jq -r '.tool_input.path')" }
+        ]
+      }
+    ]
+  }
+}
 ```
 
-### Context Variables
+### Matchers
 
-Hooks receive environment variables:
+Matchers filter hooks using regex against the event's context (tool name, source, etc.):
+
+```json
+"matcher": "run_shell"            // Only run_shell tool calls
+"matcher": "edit_file|write_file" // Edit or write tool calls
+"matcher": "mcp__.*"              // All MCP tools
+```
+
+No matcher = matches all events of that type.
+
+### JSON stdin Input
+
+Every hook receives event data as JSON via stdin:
+
+```json
+{
+  "cwd": "/Users/dev/myproject",
+  "hook_event_name": "pre-tool",
+  "tool_name": "run_shell",
+  "tool_input": { "command": "npm test" }
+}
+```
+
+Parse with `jq`: `jq -r '.tool_input.command'`
+
+### Exit Codes
+
+| Exit code | Effect |
+|-----------|--------|
+| **0** | Proceed. stdout is injected into AI context |
+| **2** | **Block** the action. stderr is sent as feedback |
+| Other | Proceed. stderr is logged but not shown |
+
+### Environment Variables
 
 | Variable | Value |
 |----------|-------|
 | `PAW_EVENT` | The event name |
 | `PAW_CWD` | Current working directory |
+| `PAW_TOOL_NAME` | Tool name (for tool events) |
 
-Use `{{key}}` placeholders in commands to interpolate context values. Hooks time out after 10s by default (configurable per hook via `timeout` in ms).
+### Examples
+
+**Block dangerous shell commands:**
+```bash
+#!/bin/bash
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+if echo "$COMMAND" | grep -q "drop table"; then
+  echo "Blocked: dropping tables is not allowed" >&2
+  exit 2
+fi
+exit 0
+```
+
+**Auto-format after file edits:**
+```json
+{
+  "hooks": {
+    "post-tool": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          { "type": "command", "command": "jq -r '.tool_input.path' | xargs npx prettier --write" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Keep AI working until tests pass (stop hook):**
+```json
+{
+  "hooks": {
+    "stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "npm test >/dev/null 2>&1 || (echo 'Tests failing, keep working' >&2; exit 2)" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Hooks time out after 10s by default (configurable per hook via `timeout` in ms). All matching hooks run in parallel.
 
 ## Provider Settings (`/settings`)
 
@@ -838,6 +1012,8 @@ you  analyze this codebase
 18. **Smart Router** — Auto-detect best mode from message content (multilingual)
 19. **Trust Layer** — `/verify` cross-provider code verification with provider/model/effort selection (↑↓)
 20. **Agent Safety** — `/safety` 4-tier risk classification, destructive command blocking, auto git checkpoint
+21. **Skills upgrade** — Directory-based SKILL.md, $ARGUMENTS substitution, !`command` injection, extended frontmatter
+22. **Hooks upgrade** — Claude Code-style: matchers, JSON stdin, exit code blocking, settings.json config, 10 events
 
 ## License
 
