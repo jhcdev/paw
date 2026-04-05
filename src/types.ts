@@ -15,9 +15,10 @@ export type AgentTurnResult = {
 };
 
 export type OnChunkCallback = (chunk: string) => void;
+export type OnStatusCallback = (status: string) => void;
 
 export interface LlmProvider {
-  runTurn(prompt: string, onChunk?: OnChunkCallback): Promise<AgentTurnResult>;
+  runTurn(prompt: string, onChunk?: OnChunkCallback, onStatus?: OnStatusCallback): Promise<AgentTurnResult>;
   clear(): void;
 }
 

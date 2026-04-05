@@ -41,7 +41,7 @@ export class OpenAIProvider implements LlmProvider {
     this.messages.push({ role: "system", content: SYSTEM_PROMPT });
   }
 
-  async runTurn(prompt: string, onChunk?: (chunk: string) => void): Promise<AgentTurnResult> {
+  async runTurn(prompt: string, onChunk?: (chunk: string) => void, onStatus?: (status: string) => void): Promise<AgentTurnResult> {
     this.messages.push({ role: "user", content: prompt });
     let assistantText = "";
     const allHandlers = { ...toolHandlers, ...this.extraHandlers };
@@ -96,6 +96,7 @@ export class OpenAIProvider implements LlmProvider {
         if (toolCalls.length === 0) return { text: assistantText, usage: totalUsage };
 
         for (const toolCall of toolCalls) {
+          if (onStatus) onStatus(`tool: ${toolCall.name}`);
           const handler = allHandlers[toolCall.name];
           if (!handler) {
             this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: `Unknown tool: ${toolCall.name}` });
@@ -137,6 +138,7 @@ export class OpenAIProvider implements LlmProvider {
       if (!toolCalls || toolCalls.length === 0) return { text: assistantText, usage: totalUsage };
 
       for (const toolCall of toolCalls) {
+        if (onStatus) onStatus(`tool: ${toolCall.function.name}`);
         const handler = allHandlers[toolCall.function.name];
         if (!handler) {
           this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: `Unknown tool: ${toolCall.function.name}` });

@@ -53,7 +53,7 @@ export class CodexProvider implements LlmProvider {
     return `[Previous conversation]\n${contextLines.join("\n")}\n\n[Current message]\n${prompt}`;
   }
 
-  async runTurn(prompt: string, onChunk?: (chunk: string) => void): Promise<AgentTurnResult> {
+  async runTurn(prompt: string, _onChunk?: (chunk: string) => void, onStatus?: (status: string) => void): Promise<AgentTurnResult> {
     const fullPrompt = this.buildPromptWithHistory(prompt);
     this.history.push({ role: "user", text: prompt });
 
@@ -76,7 +76,22 @@ export class CodexProvider implements LlmProvider {
       let stderr = "";
 
       child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
-      child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
+      child.stderr.on("data", (data: Buffer) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        if (onStatus) {
+          // Parse Codex stderr for meaningful activity info
+          for (const line of chunk.split("\n")) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("warning:") || trimmed.startsWith("Warning")) continue;
+            if (trimmed.includes("reading") || trimmed.includes("Reading")) { onStatus(`reading file...`); }
+            else if (trimmed.includes("writing") || trimmed.includes("Writing")) { onStatus(`writing file...`); }
+            else if (trimmed.includes("running") || trimmed.includes("Running") || trimmed.includes("exec")) { onStatus(`running command...`); }
+            else if (trimmed.includes("searching") || trimmed.includes("Searching")) { onStatus(`searching...`); }
+            else if (trimmed.length > 5 && trimmed.length < 100) { onStatus(trimmed); }
+          }
+        }
+      });
 
       const timeout = setTimeout(() => {
         child.kill("SIGTERM");

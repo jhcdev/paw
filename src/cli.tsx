@@ -1730,9 +1730,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           // Solo mode — stream response in real-time
           setThinkMsg(randomCatMood());
           setStreamingText("");
-          const result = await agent.runTurn(enrichedLine, (chunk) => {
-            setStreamingText((prev) => prev + chunk);
-          });
+          const result = await agent.runTurn(
+            enrichedLine,
+            (chunk) => { setStreamingText((prev) => prev + chunk); },
+            (status) => { setThinkMsg(status); },
+          );
           setStreamingText("");
           setTurnCount((c) => c + 1);
           setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);

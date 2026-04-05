@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { MessageParam, ToolResultBlockParam } from "@anthropic-ai/sdk/resources/messages";
+import type { MessageParam, TextBlockParam, ToolResultBlockParam } from "@anthropic-ai/sdk/resources/messages";
 import { toolDefinitions, toolHandlers, createSafeHandlers } from "../tools.js";
 import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler, TokenUsage } from "../types.js";
 import type { SafetyConfig } from "../safety.js";
@@ -43,7 +43,7 @@ export class AnthropicProvider implements LlmProvider {
 
   clear(): void { this.messages.length = 0; }
 
-  async runTurn(prompt: string, onChunk?: (chunk: string) => void): Promise<AgentTurnResult> {
+  async runTurn(prompt: string, onChunk?: (chunk: string) => void, onStatus?: (status: string) => void): Promise<AgentTurnResult> {
     this.messages.push({ role: "user", content: prompt });
     let assistantText = "";
     const allTools = [...toolDefinitions, ...this.extraTools];
@@ -52,6 +52,7 @@ export class AnthropicProvider implements LlmProvider {
     const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
     for (let i = 0; i < 10; i++) {
+      let response: Awaited<ReturnType<Anthropic["messages"]["create"]>>;
       if (onChunk) {
         // Streaming mode
         const stream = this.client.messages.stream({
@@ -61,32 +62,29 @@ export class AnthropicProvider implements LlmProvider {
 
         stream.on("text", (text) => { onChunk(text); });
 
-        const response = await stream.finalMessage();
-        totalUsage.inputTokens += response.usage.input_tokens;
-        totalUsage.outputTokens += response.usage.output_tokens;
-        this.messages.push({ role: "assistant", content: response.content });
-
-        const textBlocks = response.content.filter((b) => b.type === "text");
-        if (textBlocks.length > 0) assistantText = textBlocks.map((b) => b.text).join("\n");
+        response = await stream.finalMessage();
       } else {
         // Non-streaming mode
-        const response = await this.client.messages.create({
+        response = await this.client.messages.create({
           model: this.model, max_tokens: 4096, system: SYSTEM_PROMPT,
           messages: this.messages, tools: allTools,
         });
-        totalUsage.inputTokens += response.usage.input_tokens;
-        totalUsage.outputTokens += response.usage.output_tokens;
-        this.messages.push({ role: "assistant", content: response.content });
-
-        const textBlocks = response.content.filter((b) => b.type === "text");
-        if (textBlocks.length > 0) assistantText = textBlocks.map((b) => b.text).join("\n");
       }
+
+      totalUsage.inputTokens += response.usage.input_tokens;
+      totalUsage.outputTokens += response.usage.output_tokens;
+      this.messages.push({ role: "assistant", content: response.content });
+
+      const textBlocks = response.content.filter((b) => b.type === "text");
+      if (textBlocks.length > 0) assistantText = textBlocks.map((b) => b.text).join("\n");
 
       const toolUses = response.content.filter((b) => b.type === "tool_use");
       if (toolUses.length === 0) return { text: assistantText, usage: totalUsage };
 
       const toolResults: ToolResultBlockParam[] = [];
+      const hookContextBlocks: TextBlockParam[] = [];
       for (const toolUse of toolUses) {
+        if (onStatus) onStatus(`tool: ${toolUse.name}`);
         const handler = allHandlers[toolUse.name];
         if (!handler) {
           toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, is_error: true, content: `Unknown tool: ${toolUse.name}` });
@@ -96,6 +94,9 @@ export class AnthropicProvider implements LlmProvider {
         // Pre-tool hook
         if (this.toolHooks?.preTool) {
           const hookResult = await this.toolHooks.preTool(toolUse.name, toolUse.input as Record<string, unknown>);
+          if (hookResult.additionalContext) {
+            hookContextBlocks.push({ type: "text", text: hookResult.additionalContext });
+          }
           if (hookResult.blocked) {
             toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, is_error: true, content: hookResult.reason ?? "Blocked by hook" });
             continue;
@@ -110,7 +111,10 @@ export class AnthropicProvider implements LlmProvider {
 
           // Post-tool hook
           if (this.toolHooks?.postTool) {
-            await this.toolHooks.postTool(toolUse.name, toolUse.input as Record<string, unknown>, result);
+            const hookResult = await this.toolHooks.postTool(toolUse.name, toolUse.input as Record<string, unknown>, result);
+            if (hookResult.additionalContext) {
+              hookContextBlocks.push({ type: "text", text: hookResult.additionalContext });
+            }
           }
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
@@ -122,7 +126,7 @@ export class AnthropicProvider implements LlmProvider {
           }
         }
       }
-      this.messages.push({ role: "user", content: toolResults });
+      this.messages.push({ role: "user", content: [...toolResults, ...hookContextBlocks] });
     }
     return { text: assistantText || "Stopped after reaching the tool iteration limit.", usage: totalUsage };
   }
