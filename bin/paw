@@ -1,10 +1,19 @@
-#!/usr/bin/env bash
-# Resolve symlinks to find the real install directory
-SOURCE="${BASH_SOURCE[0]}"
-while [ -L "$SOURCE" ]; do
-  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
-done
-DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
-exec node --import=tsx/esm "$DIR/src/index.ts" "$@"
+#!/usr/bin/env node
+
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const root = join(__dirname, "..");
+
+const distEntry = join(root, "dist", "src", "index.js");
+
+if (existsSync(distEntry)) {
+  await import(distEntry);
+} else {
+  const { register } = await import("node:module");
+  register("tsx/esm", import.meta.url);
+  await import(join(root, "src", "index.ts"));
+}

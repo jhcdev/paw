@@ -1,14 +1,19 @@
 {
   "name": "paw",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "bin": {
     "paw": "./bin/paw"
   },
+  "files": [
+    "bin/",
+    "dist/",
+    "README.md"
+  ],
   "description": "Paw — Multi-provider AI coding agent for the terminal.",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build",
     "check": "tsc --noEmit -p tsconfig.json",
     "dev": "tsx src/index.ts",
     "start": "tsx src/index.ts",
