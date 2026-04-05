@@ -1599,7 +1599,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       // ── unknown command / skill ──
-      if (line.startsWith("/")) {
+      // Exclude file paths like /home/dev/... — commands are /word with no nested slashes
+      if (line.startsWith("/") && !line.slice(1).split(/\s+/)[0]!.includes("/")) {
         const skillName = line.slice(1).split(/\s+/)[0]!;
         const skillArgs = line.slice(1 + skillName.length).trim();
         const skills = await loadSkills(options.cwd);
