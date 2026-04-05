@@ -184,6 +184,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           },
         ]);
       }
+    }, () => {
+      // Always returns the current active provider/model at spawn time
+      const config = agent.getMulti().getProviderConfig(agent.getActiveProvider());
+      if (!config) return null;
+      return { provider: agent.getActiveProvider(), apiKey: config.apiKey, model: agent.getActiveModel(), cwd: options.cwd, baseUrl: config.baseUrl };
     });
     return mgr;
   });
@@ -434,7 +439,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             }
             setSpawnConfigured(true);
           }
-          const id = spawnManager.spawn(spawnTaskInput.trim(), spawnPanelProvider as ProviderName, spawnPanelModel);
+          const id = spawnManager.spawn(spawnTaskInput.trim(), spawnPanelProvider as ProviderName, spawnPanelModel, getSessionContext());
           const task = spawnManager.getTask(id);
           setEntries((c) => [...c, { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${spawnTaskInput.trim()}` }]);
           setSpawnPanel("off");
@@ -774,6 +779,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     [],
   );
 
+  // Build recent conversation context for spawn agents
+  const getSessionContext = useCallback(() => {
+    return entries.slice(-10).map((e) => {
+      if (e.role === "user") return `> ${e.text}`;
+      if (e.role === "assistant") return `AI: ${e.text.slice(0, 300)}`;
+      return `[${e.text.slice(0, 100)}]`;
+    }).join("\n");
+  }, [entries]);
+
   const submit = useCallback(
     async (value: string, skipRender = false) => {
       const line = value.trim();
@@ -868,7 +882,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             }
             setSpawnConfigured(true);
           }
-          const id = spawnManager.spawn(parsed.goal, parsed.provider, parsed.model);
+          const id = spawnManager.spawn(parsed.goal, parsed.provider, parsed.model, getSessionContext());
           const task = spawnManager.getTask(id);
           setEntries((c) => [...c,
             { role: "user", text: line },
@@ -1374,7 +1388,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setSpawnConfigured(true);
         }
 
-        const id = spawnManager.spawn(parsed.goal, parsed.provider, parsed.model);
+        const id = spawnManager.spawn(parsed.goal, parsed.provider, parsed.model, getSessionContext());
         const task = spawnManager.getTask(id);
         setEntries((c) => [
           ...c,

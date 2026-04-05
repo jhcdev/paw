@@ -34,10 +34,12 @@ export class SpawnManager {
   private configs: SpawnConfig[] = [];
   private cwd: string;
   private onUpdate: (task: SpawnedTask) => void;
+  private getDefaultConfig?: () => SpawnConfig | null;
 
-  constructor(cwd: string, onUpdate: (task: SpawnedTask) => void) {
+  constructor(cwd: string, onUpdate: (task: SpawnedTask) => void, getDefaultConfig?: () => SpawnConfig | null) {
     this.cwd = cwd;
     this.onUpdate = onUpdate;
+    this.getDefaultConfig = getDefaultConfig;
   }
 
   /** Register available provider configs for round-robin distribution */
@@ -47,15 +49,21 @@ export class SpawnManager {
 
   /** Spawn a new agent for a task. Returns the task id.
    *  preferredProvider: override provider name
-   *  preferredModel: override model (creates a new config with the same apiKey) */
-  spawn(goal: string, preferredProvider?: ProviderName, preferredModel?: string): number {
+   *  preferredModel: override model (creates a new config with the same apiKey)
+   *  sessionContext: recent conversation context to inject */
+  spawn(goal: string, preferredProvider?: ProviderName, preferredModel?: string, sessionContext?: string): number {
     const id = this.nextId++;
 
-    // Pick provider: preferred > round-robin across configs
+    // Pick provider: preferred > round-robin > current active model
+    const allConfigs = this.configs.length > 0 ? this.configs : (() => {
+      const def = this.getDefaultConfig?.();
+      return def ? [def] : [];
+    })();
+
     let config = preferredProvider
-      ? this.configs.find((c) => c.provider === preferredProvider) ??
-        this.configs[0]!
-      : this.configs[(id - 1) % this.configs.length]!;
+      ? allConfigs.find((c) => c.provider === preferredProvider) ??
+        allConfigs[0]!
+      : allConfigs[(id - 1) % allConfigs.length]!;
 
     // Override model if specified
     if (preferredModel && config) {
@@ -74,12 +82,12 @@ export class SpawnManager {
     this.onUpdate(task);
 
     // Run async — don't await
-    this.runTask(task, config).catch(() => {});
+    this.runTask(task, config, sessionContext).catch(() => {});
 
     return id;
   }
 
-  private async runTask(task: SpawnedTask, config: SpawnConfig): Promise<void> {
+  private async runTask(task: SpawnedTask, config: SpawnConfig, sessionContext?: string): Promise<void> {
     task.status = "running";
     task.startedAt = Date.now();
     this.onUpdate(task);
@@ -124,7 +132,7 @@ export class SpawnManager {
 
 PROJECT CONTEXT:
 ${projectContext}
-
+${sessionContext ? `SESSION CONTEXT (recent conversation):\n${sessionContext}\n` : ""}
 TASK: ${task.goal}
 
 Work step by step:
