@@ -755,6 +755,45 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+      // ── spawn runs immediately even while busy ──
+      if (line.startsWith("/spawn ") && busyRef.current) {
+        const goal = line.slice(7).trim();
+        if (goal) {
+          // Lazy-register provider configs
+          if (!spawnConfigured) {
+            const registered = agent.getMulti().getRegistered();
+            for (const reg of registered) {
+              const config = agent.getMulti().getProviderConfig(reg.name);
+              if (config) {
+                spawnManager.addConfig({ provider: reg.name, apiKey: config.apiKey, model: config.model ?? reg.model, cwd: options.cwd, baseUrl: config.baseUrl });
+              }
+            }
+            setSpawnConfigured(true);
+          }
+          const id = spawnManager.spawn(goal);
+          const task = spawnManager.getTask(id);
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${goal}` },
+          ]);
+        }
+        return;
+      }
+
+      // ── /tasks runs immediately even while busy ──
+      if ((line === "/tasks" || line.startsWith("/tasks ")) && busyRef.current) {
+        const arg = line.slice(6).trim();
+        if (arg === "results" || arg === "result") {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatResults() }]);
+        } else if (arg === "clear") {
+          const cleared = spawnManager.clearCompleted();
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Cleared ${cleared} completed task(s).` }]);
+        } else {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatStatus() }]);
+        }
+        return;
+      }
+
       // ── queue if busy (show in pending area, process merged after response) ──
       if (busyRef.current) {
         pendingRef.current.push(line);
