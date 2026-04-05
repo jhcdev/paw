@@ -101,7 +101,7 @@ Example:  anthropic → planner, reviewer, optimizer
 - **Message queue** — Type while AI is thinking; queued messages merge into one turn
 - **Autocomplete** — `/` triggers command list; Enter executes, Tab fills
 - **Security hardened** — Injection protection, SSRF blocking, symlink guards
-- **`/verify` mode** — Cross-provider code verification: AI generates, a different AI reviews
+- **`/verify` mode** — Cross-provider code verification with reviewer provider/model/effort selection (↑↓)
 - **`/safety` guards** — Risk classification for all tool calls; blocks destructive commands automatically
 - **`/auto` mode** — Autonomous agent: plan → execute → verify → fix loop until done
 - **`/pipe` mode** — Feed shell output to AI: analyze, auto-fix errors, or watch commands
@@ -513,7 +513,39 @@ FIXED after 3 iteration(s) (18.2s)
 After AI generates code, a different provider automatically reviews the changes for bugs, security issues, and logic errors.
 
 ```
-/verify              → Toggle auto-verify ON/OFF
+/verify              → Open verify settings panel (↑↓)
+```
+
+Full arrow-key configuration — same pattern as `/model` and `/team`:
+
+```
+╭─ Verify Settings ──────────────────────╮
+│ Status: OFF  Reviewer: auto            │
+│  > Toggle ON/OFF                       │
+│    Select reviewer provider            │
+│    Auto (use different provider)       │
+│  ↑↓ navigate  Enter select  Esc back   │
+╰────────────────────────────────────────╯
+         ↓ Select reviewer provider
+╭─ Select reviewer provider ─────────────╮
+│  > anthropic — claude-sonnet-4-6       │
+│    codex — gpt-5.4                     │
+│    ollama — llama3                     │
+╰────────────────────────────────────────╯
+         ↓ Select model
+╭─ Select model for codex ──────────────╮
+│  > gpt-5.4 — GPT-5.4                  │
+│    gpt-5.4-mini — GPT-5.4 Mini        │
+╰────────────────────────────────────────╯
+         ↓ Select effort (Codex only)
+╭─ Select effort level ─────────────────╮
+│    Low — Fast, lighter reasoning       │
+│  > Medium — Balanced (default)         │
+│    High — Complex problems             │
+│    Extra High — Maximum depth          │
+╰────────────────────────────────────────╯
+         ↓ Enter
+~ Auto-verify: ON (reviewer: codex/gpt-5.4, effort: high)
 ```
 
 When enabled, every turn that modifies files triggers a verification pass:
@@ -523,17 +555,17 @@ you  add user authentication endpoint
 =^.^= [writes src/auth.ts, edits src/routes.ts]
 
 ---
-Verification (by ollama/qwen3):
+Verification (by codex/gpt-5.4):
   Confidence: 85/100
   warning: src/auth.ts — Potential SQL injection in query builder
   info: src/routes.ts — Consider adding rate limiting
 ---
 ```
 
-- Uses a **different provider** than the one that generated code (e.g. Anthropic generates → Ollama reviews)
-- Falls back to same provider with a reviewer prompt if only one is available
+- **Full control**: choose reviewer provider, model, and effort level (Codex)
+- Uses a **different provider** than the one that generated code (e.g. Anthropic generates → Codex reviews)
+- **Auto mode**: automatically picks a different provider; falls back to same provider with a reviewer prompt if only one is available
 - Checks: N+1 queries, race conditions, security vulnerabilities, logic errors, missing error handling
-- Zero setup — just `/verify` to toggle
 
 ### `/safety` — Agent Safety Guards
 
@@ -645,7 +677,7 @@ Supports stdio, HTTP, SSE. Tools auto-injected into all providers. Failed connec
 | `/exit` | Quit |
 | `/auto <task>` | Autonomous agent mode |
 | `/pipe <cmd>` | Feed shell output to AI (fix/watch) |
-| `/verify` | Toggle cross-provider code verification |
+| `/verify` | Verify settings: reviewer provider/model/effort (↑↓) |
 | `/safety` | Configure safety guards (on/off) |
 
 ### Keyboard
@@ -804,7 +836,7 @@ you  analyze this codebase
 16. **`/auto` mode** — Autonomous plan→execute→verify→fix agent loop
 17. **`/pipe` mode** — Shell output → AI analysis/fix/watch
 18. **Smart Router** — Auto-detect best mode from message content (multilingual)
-19. **Trust Layer** — `/verify` cross-provider code verification with confidence scoring
+19. **Trust Layer** — `/verify` cross-provider code verification with provider/model/effort selection (↑↓)
 20. **Agent Safety** — `/safety` 4-tier risk classification, destructive command blocking, auto git checkpoint
 
 ## License
