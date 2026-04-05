@@ -237,11 +237,11 @@ describe("input cursor — full workflow", () => {
 
 describe("IME cursor positioning", () => {
   it("measures ASCII text from the prompt start", () => {
-    expect(measureImeColumn("abc")).toBe(9);
+    expect(measureImeColumn("abc")).toBe(10);
   });
 
   it("counts wide characters as two columns", () => {
-    expect(measureImeColumn("안a")).toBe(9);
+    expect(measureImeColumn("안a")).toBe(10);
   });
 
   it("counts the default footer when nothing extra is shown", () => {

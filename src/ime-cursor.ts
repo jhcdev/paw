@@ -3,7 +3,7 @@ export function measureImeColumn(textBeforeCursor: string): number {
   for (const ch of textBeforeCursor) {
     col += ch.codePointAt(0)! > 0x7f ? 2 : 1;
   }
-  return col + 1; // 1-based column
+  return col + 2; // 1-based column + 1 to position after █ block cursor
 }
 
 export function getBaseLinesBelowInput(): number {
