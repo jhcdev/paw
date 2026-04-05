@@ -158,4 +158,86 @@ describe("SpawnManager", () => {
       expect(mgr.getCompletedTasks().filter(t => t.status === "done")).toHaveLength(0);
     });
   });
+
+  describe("getDefaultConfig (lazy getter)", () => {
+    it("uses getDefaultConfig when no configs registered", () => {
+      const mgr = new SpawnManager(baseCwd, () => {}, () => ({
+        provider: "ollama" as const,
+        apiKey: "",
+        model: "qwen3",
+        cwd: baseCwd,
+      }));
+
+      mgr.spawn("test task");
+      const task = mgr.getTask(1);
+      expect(task).toBeDefined();
+      expect(task!.provider).toBe("ollama");
+      expect(task!.model).toBe("qwen3");
+    });
+
+    it("prefers registered configs over getDefaultConfig", () => {
+      const mgr = new SpawnManager(baseCwd, () => {}, () => ({
+        provider: "ollama" as const,
+        apiKey: "",
+        model: "qwen3",
+        cwd: baseCwd,
+      }));
+      mgr.addConfig(makeConfig("anthropic"));
+
+      mgr.spawn("test task");
+      const task = mgr.getTask(1);
+      expect(task!.provider).toBe("anthropic");
+    });
+
+    it("getDefaultConfig is called at spawn time (not init time)", () => {
+      let currentModel = "model-v1";
+      const mgr = new SpawnManager(baseCwd, () => {}, () => ({
+        provider: "ollama" as const,
+        apiKey: "",
+        model: currentModel,
+        cwd: baseCwd,
+      }));
+
+      mgr.spawn("task 1");
+      expect(mgr.getTask(1)!.model).toBe("model-v1");
+
+      // Simulate /model change
+      currentModel = "model-v2";
+      mgr.spawn("task 2");
+      expect(mgr.getTask(2)!.model).toBe("model-v2");
+    });
+
+    it("handles null getDefaultConfig gracefully", () => {
+      const mgr = new SpawnManager(baseCwd, () => {}, () => null);
+      // Should not crash — task marked as failed
+      const id = mgr.spawn("task");
+      const task = mgr.getTask(id);
+      expect(task).toBeDefined();
+      expect(task!.status).toBe("failed");
+      expect(task!.error).toContain("No provider configured");
+    });
+  });
+
+  describe("sessionContext injection", () => {
+    it("passes sessionContext to spawned task", () => {
+      const mgr = new SpawnManager(baseCwd, () => {});
+      mgr.addConfig(makeConfig("anthropic"));
+
+      const context = "> hello\nAI: Hi there!\n> add auth";
+      const id = mgr.spawn("add auth tests", undefined, undefined, context);
+      const task = mgr.getTask(id);
+      expect(task).toBeDefined();
+      expect(task!.goal).toBe("add auth tests");
+    });
+
+    it("works without sessionContext (undefined)", () => {
+      const mgr = new SpawnManager(baseCwd, () => {});
+      mgr.addConfig(makeConfig("anthropic"));
+
+      const id = mgr.spawn("simple task");
+      const task = mgr.getTask(id);
+      expect(task).toBeDefined();
+      expect(task!.goal).toBe("simple task");
+    });
+  });
 });

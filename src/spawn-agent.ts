@@ -70,6 +70,14 @@ export class SpawnManager {
       config = { ...config, model: preferredModel };
     }
 
+    // No config available — mark as failed immediately
+    if (!config) {
+      const task: SpawnedTask = { id, goal, provider: "ollama" as ProviderName, model: "unknown", status: "failed", error: "No provider configured" };
+      this.tasks.push(task);
+      this.onUpdate(task);
+      return id;
+    }
+
     const task: SpawnedTask = {
       id,
       goal,
