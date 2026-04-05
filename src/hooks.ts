@@ -22,14 +22,45 @@ export type Hook = {
   timeout?: number;
 };
 
-type HookConfig = {
-  hooks?: Hook[];
-};
+const HOOKS_DIR = path.join(os.homedir(), ".paw", "hooks");
+const PROJECT_HOOKS_DIR = ".paw/hooks";
 
-const CONFIG_PATHS = [
-  ".paw/hooks.json",
-];
-const USER_CONFIG = path.join(os.homedir(), ".paw", "hooks.json");
+function parseFrontmatter(content: string): Record<string, string> {
+  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!match) return {};
+
+  const meta: Record<string, string> = {};
+  for (const line of match[1]!.split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx > 0) {
+      meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    }
+  }
+  return meta;
+}
+
+async function loadHooksFromDir(dir: string): Promise<Hook[]> {
+  const hooks: Hook[] = [];
+  try {
+    const files = await fs.readdir(dir);
+    for (const file of files) {
+      if (!file.endsWith(".md")) continue;
+      try {
+        const raw = await fs.readFile(path.join(dir, file), "utf8");
+        const meta = parseFrontmatter(raw);
+        if (meta.event && meta.command) {
+          hooks.push({
+            event: meta.event as HookEvent,
+            command: meta.command,
+            name: meta.name,
+            timeout: meta.timeout ? parseInt(meta.timeout, 10) : undefined,
+          });
+        }
+      } catch { continue; }
+    }
+  } catch {}
+  return hooks;
+}
 
 export class HookManager {
   private hooks: Hook[] = [];
@@ -42,21 +73,11 @@ export class HookManager {
   async load(): Promise<void> {
     this.hooks = [];
 
-    // Load project hooks
-    for (const rel of CONFIG_PATHS) {
-      try {
-        const raw = await fs.readFile(path.join(this.cwd, rel), "utf8");
-        const config = JSON.parse(raw) as HookConfig;
-        if (config.hooks) this.hooks.push(...config.hooks);
-      } catch { continue; }
-    }
+    // Load project hooks from .paw/hooks/*.md
+    this.hooks.push(...await loadHooksFromDir(path.join(this.cwd, PROJECT_HOOKS_DIR)));
 
-    // Load user hooks
-    try {
-      const raw = await fs.readFile(USER_CONFIG, "utf8");
-      const config = JSON.parse(raw) as HookConfig;
-      if (config.hooks) this.hooks.push(...config.hooks);
-    } catch {}
+    // Load user hooks from ~/.paw/hooks/*.md
+    this.hooks.push(...await loadHooksFromDir(HOOKS_DIR));
   }
 
   getHooks(event: HookEvent): Hook[] {

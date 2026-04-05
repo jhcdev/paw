@@ -57,42 +57,61 @@ const BUILTIN_SKILLS: Skill[] = [
   },
 ];
 
+function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
+  const match = content.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!match) return { meta: {}, body: content.trim() };
+
+  const meta: Record<string, string> = {};
+  for (const line of match[1]!.split("\n")) {
+    const idx = line.indexOf(":");
+    if (idx > 0) {
+      meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+    }
+  }
+  return { meta, body: match[2]!.trim() };
+}
+
+function toFrontmatter(meta: Record<string, string>, body: string): string {
+  const lines = Object.entries(meta).map(([k, v]) => `${k}: ${v}`);
+  return `---\n${lines.join("\n")}\n---\n\n${body}\n`;
+}
+
 async function ensureDir(dir: string): Promise<void> {
   await fs.mkdir(dir, { recursive: true });
+}
+
+async function loadSkillsFromDir(dir: string, source: "user" | "project"): Promise<Skill[]> {
+  const skills: Skill[] = [];
+  try {
+    const files = await fs.readdir(dir);
+    for (const file of files) {
+      if (!file.endsWith(".md")) continue;
+      try {
+        const raw = await fs.readFile(path.join(dir, file), "utf8");
+        const { meta, body } = parseFrontmatter(raw);
+        if (meta.name && body) {
+          skills.push({
+            name: meta.name,
+            description: meta.description ?? "",
+            prompt: body,
+            source,
+          });
+        }
+      } catch { continue; }
+    }
+  } catch {}
+  return skills;
 }
 
 export async function loadSkills(cwd: string): Promise<Skill[]> {
   const skills = [...BUILTIN_SKILLS];
 
-  // Load user skills from ~/.paw/skills/
-  try {
-    await ensureDir(SKILLS_DIR);
-    const files = await fs.readdir(SKILLS_DIR);
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
-      try {
-        const raw = await fs.readFile(path.join(SKILLS_DIR, file), "utf8");
-        const skill = JSON.parse(raw) as Skill;
-        skill.source = "user";
-        skills.push(skill);
-      } catch { continue; }
-    }
-  } catch {}
+  // Load user skills from ~/.paw/skills/*.md
+  await ensureDir(SKILLS_DIR);
+  skills.push(...await loadSkillsFromDir(SKILLS_DIR, "user"));
 
-  // Load project skills from .paw/skills/
-  try {
-    const projectDir = path.join(cwd, PROJECT_SKILLS_DIR);
-    const files = await fs.readdir(projectDir);
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
-      try {
-        const raw = await fs.readFile(path.join(projectDir, file), "utf8");
-        const skill = JSON.parse(raw) as Skill;
-        skill.source = "project";
-        skills.push(skill);
-      } catch { continue; }
-    }
-  } catch {}
+  // Load project skills from .paw/skills/*.md
+  skills.push(...await loadSkillsFromDir(path.join(cwd, PROJECT_SKILLS_DIR), "project"));
 
   return skills;
 }
@@ -100,13 +119,17 @@ export async function loadSkills(cwd: string): Promise<Skill[]> {
 export async function saveSkill(skill: Omit<Skill, "source">, scope: "user" | "project", cwd: string): Promise<void> {
   const dir = scope === "user" ? SKILLS_DIR : path.join(cwd, PROJECT_SKILLS_DIR);
   await ensureDir(dir);
-  await fs.writeFile(path.join(dir, `${skill.name}.json`), JSON.stringify(skill, null, 2), { mode: 0o600 });
+  const content = toFrontmatter(
+    { name: skill.name, description: skill.description },
+    skill.prompt,
+  );
+  await fs.writeFile(path.join(dir, `${skill.name}.md`), content, { mode: 0o600 });
 }
 
 export async function deleteSkill(name: string, scope: "user" | "project", cwd: string): Promise<boolean> {
   const dir = scope === "user" ? SKILLS_DIR : path.join(cwd, PROJECT_SKILLS_DIR);
   try {
-    await fs.unlink(path.join(dir, `${name}.json`));
+    await fs.unlink(path.join(dir, `${name}.md`));
     return true;
   } catch { return false; }
 }
