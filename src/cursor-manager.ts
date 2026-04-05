@@ -7,7 +7,8 @@
  * - When Ink writes (render start): move cursor down to Ink's expected
  *   position so eraseLines works correctly.
  * - When Ink finishes (SHOW_CURSOR): move cursor back up to IME position.
- * - Dynamically detect trailing newline in Ink output to adjust offset.
+ * - Dynamically adjust offset: if rendered lines < terminal height,
+ *   Ink cursor sits on an extra trailing line (+1 offset needed).
  */
 
 const HIDE_CURSOR = "\x1B[?25l";
@@ -38,20 +39,18 @@ export class CursorManager {
   private stderrTail = "";
   /** true when cursor is currently at the IME position (moved up) */
   private atImePosition = false;
-  /** Tracks whether Ink's last write before SHOW_CURSOR ended with a newline */
-  private trailingNewline = false;
-  /** Stores the last chunk written (to detect trailing newline) */
-  private lastChunk = "";
+  /** Count newlines in the current render cycle to estimate output height */
+  private renderNewlines = 0;
+  /** Whether the output doesn't fill the terminal (trailing blank line exists) */
+  private hasTrailingLine = true;
 
   private canMoveToInput(): boolean {
     return this.linesUp > 0 && this.col > 0;
   }
 
   private getOffset(): number {
-    // Base offset from countLinesBelowInput
     const base = this.linesUp + getRowOffset();
-    // If Ink left the cursor on a new empty line (trailing \n), add 1
-    return this.trailingNewline ? base + 1 : base;
+    return this.hasTrailingLine ? base + 1 : base;
   }
 
   /** Move cursor from IME position back DOWN to where Ink expects it. */
@@ -102,26 +101,27 @@ export class CursorManager {
         chunk: string | Uint8Array,
         ...rest: any[]
       ): boolean {
-        // Before Ink writes its render content, move cursor back down
+        // Before Ink writes, move cursor back down
         if (self.atImePosition) {
           self.cursorToInk(original);
         }
 
         const result = original(chunk, ...rest);
 
-        // Track the last chunk to detect trailing newline
+        // Count newlines in this chunk for render height estimation
         const text = chunkToString(chunk);
-        if (text.length > 0) {
-          self.lastChunk = text;
+        for (let i = 0; i < text.length; i++) {
+          if (text.charCodeAt(i) === 10) self.renderNewlines++;
         }
 
-        // After Ink finishes rendering (emits SHOW_CURSOR),
-        // detect trailing newline and move cursor to IME position.
+        // After Ink finishes rendering (emits SHOW_CURSOR)
         if (self.detectShowCursor(stream, chunk)) {
-          // Check if the content before SHOW_CURSOR ended with \n
-          // Strip ANSI escapes to find the last real character
-          const beforeShow = self.lastChunk.replace(SHOW_CURSOR, "");
-          self.trailingNewline = beforeShow.endsWith("\n");
+          // If rendered lines < terminal height, output doesn't fill screen
+          // → cursor is on a trailing blank line → need +1 offset
+          const termRows = process.stdout.rows || 24;
+          self.hasTrailingLine = self.renderNewlines < termRows;
+          self.renderNewlines = 0; // reset for next render cycle
+
           self.cursorToIme(original);
         }
         return result;
@@ -133,16 +133,10 @@ export class CursorManager {
     originalStdout(HIDE_CURSOR);
   }
 
-  /**
-   * Update cursor position for IME composition.
-   * @param linesUp — lines up from end of Ink output to the input content line
-   * @param column — 1-based column position within the input line
-   */
   setCursorPosition(linesUp: number, column: number): void {
     const writer = this.originalStdoutWrite;
     if (!writer) return;
 
-    // Move back down from old position before updating
     if (this.atImePosition) {
       this.cursorToInk(writer);
     }
@@ -150,7 +144,6 @@ export class CursorManager {
     this.linesUp = linesUp;
     this.col = column;
 
-    // Move to new IME position
     this.cursorToIme(writer);
   }
 
