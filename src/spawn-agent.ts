@@ -45,15 +45,22 @@ export class SpawnManager {
     this.configs.push(config);
   }
 
-  /** Spawn a new agent for a task. Returns the task id. */
-  spawn(goal: string, preferredProvider?: ProviderName): number {
+  /** Spawn a new agent for a task. Returns the task id.
+   *  preferredProvider: override provider name
+   *  preferredModel: override model (creates a new config with the same apiKey) */
+  spawn(goal: string, preferredProvider?: ProviderName, preferredModel?: string): number {
     const id = this.nextId++;
 
     // Pick provider: preferred > round-robin across configs
-    const config = preferredProvider
+    let config = preferredProvider
       ? this.configs.find((c) => c.provider === preferredProvider) ??
         this.configs[0]!
       : this.configs[(id - 1) % this.configs.length]!;
+
+    // Override model if specified
+    if (preferredModel && config) {
+      config = { ...config, model: preferredModel };
+    }
 
     const task: SpawnedTask = {
       id,

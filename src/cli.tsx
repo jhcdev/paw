@@ -89,11 +89,32 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/exit", desc: "quit" },
   { name: "/auto", desc: "autonomous agent mode" },
   { name: "/pipe", desc: "feed shell output to AI" },
-  { name: "/spawn", desc: "spawn a parallel sub-agent" },
+  { name: "/spawn", desc: "spawn a parallel sub-agent (↑↓ or /spawn <task>)" },
   { name: "/tasks", desc: "list spawned agent tasks" },
   { name: "/verify", desc: "toggle auto-verify or set provider (/verify ollama)" },
   { name: "/safety", desc: "configure safety guards" },
 ];
+
+const PROVIDER_NAMES = new Set(["anthropic", "codex", "ollama"]);
+
+/** Parse "/spawn [provider[/model]] <goal>" into components */
+function parseSpawnArgs(raw: string): { provider?: ProviderName; model?: string; goal: string } {
+  const parts = raw.trim().split(/\s+/);
+  if (parts.length === 0) return { goal: "" };
+
+  const first = parts[0]!;
+  // Check if first token is "provider" or "provider/model"
+  if (first.includes("/")) {
+    const [prov, ...modelParts] = first.split("/");
+    if (prov && PROVIDER_NAMES.has(prov)) {
+      return { provider: prov as ProviderName, model: modelParts.join("/") || undefined, goal: parts.slice(1).join(" ") };
+    }
+  } else if (PROVIDER_NAMES.has(first)) {
+    return { provider: first as ProviderName, goal: parts.slice(1).join(" ") };
+  }
+
+  return { goal: raw.trim() };
+}
 
 function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions }) {
   const { exit } = useApp();
@@ -139,6 +160,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [activityScroll, setActivityScroll] = useState(0);
   const [statusPanel, setStatusPanel] = useState(false);
   const [verifyPanel, setVerifyPanel] = useState<"off" | "menu" | "providers" | "models" | "effort">("off");
+  const [spawnPanel, setSpawnPanel] = useState<"off" | "providers" | "models" | "task">("off");
+  const [spawnPanelProvider, setSpawnPanelProvider] = useState<string>("");
+  const [spawnPanelModel, setSpawnPanelModel] = useState<string>("");
+  const [spawnPanelModels, setSpawnPanelModels] = useState<{ id: string; name: string }[]>([]);
+  const [spawnCursor, setSpawnCursor] = useState(0);
+  const [spawnTaskInput, setSpawnTaskInput] = useState("");
   const [verifyPanelProvider, setVerifyPanelProvider] = useState<string>("");
   const [verifyPanelModels, setVerifyPanelModels] = useState<{ id: string; name: string }[]>([]);
   const [verifyCursor, setVerifyCursor] = useState(0);
@@ -237,7 +264,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // ↓ = enter activity selector (below input, when no other panel active)
-    if (key.downArrow && suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && !activityView) {
+    if (key.downArrow && suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off" && !activityView) {
       const acts = agent.activityLog.getRecent(5);
       if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); return; }
     }
@@ -352,6 +379,76 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
       return;
+    }
+
+    // Spawn panel
+    if (spawnPanel !== "off") {
+      if (spawnPanel === "providers") {
+        const registered = agent.getMulti().getRegistered();
+        if (key.escape) { setSpawnPanel("off"); return; }
+        if (key.downArrow) { setSpawnCursor((i) => Math.min(i + 1, registered.length - 1)); return; }
+        if (key.upArrow) { setSpawnCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          const selected = registered[spawnCursor];
+          if (selected) {
+            setSpawnPanelProvider(selected.name);
+            getAllFilteredModels(agent.getProviderKeys()).then((all) => {
+              const provModels = all.find((g) => g.provider === selected.name);
+              setSpawnPanelModels(provModels?.models.map((m) => ({ id: m.id, name: m.name })) ?? []);
+              setSpawnPanel("models");
+              setSpawnCursor(0);
+            });
+          }
+          return;
+        }
+        return;
+      }
+      if (spawnPanel === "models") {
+        if (key.escape) { setSpawnPanel("providers"); setSpawnCursor(0); return; }
+        if (key.downArrow) { setSpawnCursor((i) => Math.min(i + 1, spawnPanelModels.length - 1)); return; }
+        if (key.upArrow) { setSpawnCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          const selected = spawnPanelModels[spawnCursor];
+          if (selected) {
+            setSpawnPanelModel(selected.id);
+            setSpawnTaskInput("");
+            setSpawnPanel("task");
+          }
+          return;
+        }
+        return;
+      }
+      if (spawnPanel === "task") {
+        if (key.escape) { setSpawnPanel("models"); setSpawnCursor(0); return; }
+        if (key.return && spawnTaskInput.trim()) {
+          // Execute the spawn
+          if (!spawnConfigured) {
+            const registered = agent.getMulti().getRegistered();
+            for (const reg of registered) {
+              const config = agent.getMulti().getProviderConfig(reg.name);
+              if (config) {
+                spawnManager.addConfig({ provider: reg.name, apiKey: config.apiKey, model: config.model ?? reg.model, cwd: options.cwd, baseUrl: config.baseUrl });
+              }
+            }
+            setSpawnConfigured(true);
+          }
+          const id = spawnManager.spawn(spawnTaskInput.trim(), spawnPanelProvider as ProviderName, spawnPanelModel);
+          const task = spawnManager.getTask(id);
+          setEntries((c) => [...c, { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${spawnTaskInput.trim()}` }]);
+          setSpawnPanel("off");
+          setSpawnTaskInput("");
+          return;
+        }
+        if (key.backspace || key.delete) {
+          setSpawnTaskInput((s) => s.slice(0, -1));
+          return;
+        }
+        if (ch && !key.ctrl && !key.meta) {
+          setSpawnTaskInput((s) => s + ch);
+          return;
+        }
+        return;
+      }
     }
 
     // Verify panel
@@ -603,7 +700,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       exit();
     }
 
-    if (suggestions.length > 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off") {
+    if (suggestions.length > 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off") {
       if (key.downArrow) {
         setSelectedIdx((i) => Math.min(i + 1, suggestions.length - 1));
         return;
@@ -631,7 +728,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // Enter to submit (inputRef synced synchronously — IME double-fire sees empty ref and exits)
-    if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off") {
+    if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off") {
       const value = inputRef.current;
       if (!value.trim()) return;
       inputRef.current = "";
@@ -757,9 +854,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       // ── spawn runs immediately even while busy ──
       if (line.startsWith("/spawn ") && busyRef.current) {
-        const goal = line.slice(7).trim();
-        if (goal) {
-          // Lazy-register provider configs
+        const parsed = parseSpawnArgs(line.slice(7));
+        if (parsed.goal) {
           if (!spawnConfigured) {
             const registered = agent.getMulti().getRegistered();
             for (const reg of registered) {
@@ -770,11 +866,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             }
             setSpawnConfigured(true);
           }
-          const id = spawnManager.spawn(goal);
+          const id = spawnManager.spawn(parsed.goal, parsed.provider, parsed.model);
           const task = spawnManager.getTask(id);
           setEntries((c) => [...c,
             { role: "user", text: line },
-            { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${goal}` },
+            { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${parsed.goal}` },
           ]);
         }
         return;
@@ -1231,10 +1327,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       // ── spawn ──
+      if (line === "/spawn") {
+        setSpawnPanel("providers");
+        setSpawnCursor(0);
+        return;
+      }
       if (line.startsWith("/spawn ")) {
-        const goal = line.slice(7).trim();
-        if (!goal) {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /spawn <task description>" }]);
+        const parsed = parseSpawnArgs(line.slice(7));
+        if (!parsed.goal) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /spawn [provider[/model]] <task>\nExamples:\n  /spawn add tests for auth\n  /spawn anthropic refactor the API\n  /spawn codex/gpt-5.4 update README\n  /spawn ollama/llama3 fix lint errors" }]);
           return;
         }
 
@@ -1256,12 +1357,12 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setSpawnConfigured(true);
         }
 
-        const id = spawnManager.spawn(goal);
+        const id = spawnManager.spawn(parsed.goal, parsed.provider, parsed.model);
         const task = spawnManager.getTask(id);
         setEntries((c) => [
           ...c,
           { role: "user", text: line },
-          { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${goal}` },
+          { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${parsed.goal}` },
         ]);
         return;
       }
@@ -1557,6 +1658,59 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                 </Box>
               ))}
               <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {spawnPanel !== "off" ? (
+        <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+          <Text color="#ff9c73" bold>Spawn Agent</Text>
+          {spawnPanelProvider ? (
+            <Text color="gray">Provider: <Text bold color="white">{spawnPanelProvider}</Text>
+            {spawnPanelModel ? <Text> / <Text bold color="white">{spawnPanelModel}</Text></Text> : null}</Text>
+          ) : null}
+
+          {spawnPanel === "providers" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select provider:</Text>
+              {agent.getMulti().getRegistered().map((p, i) => (
+                <Box key={p.name}>
+                  <Text color={i === spawnCursor ? "#ff9c73" : "gray"} bold={i === spawnCursor}>
+                    {i === spawnCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === spawnCursor ? "#ff9c73" : "#ffb088"}>{p.name}</Text>
+                  <Text color="gray"> — {p.model}</Text>
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc cancel"}</Text>
+            </Box>
+          ) : null}
+
+          {spawnPanel === "models" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select model for <Text bold color="#ffb088">{spawnPanelProvider}</Text>:</Text>
+              {spawnPanelModels.map((m, i) => (
+                <Box key={m.id}>
+                  <Text color={i === spawnCursor ? "#ff9c73" : "gray"} bold={i === spawnCursor}>
+                    {i === spawnCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === spawnCursor ? "#ff9c73" : "gray"}>{m.id}</Text>
+                  <Text color="gray"> — {m.name}</Text>
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+
+          {spawnPanel === "task" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Enter task for <Text bold color="#ffb088">{spawnPanelProvider}/{spawnPanelModel}</Text>:</Text>
+              <Box marginTop={1}>
+                <Text color="#ff9c73" bold>{"> "}</Text>
+                <Text>{spawnTaskInput}<Text color="gray">_</Text></Text>
+              </Box>
+              <Text color="gray" italic>{"\n  Enter spawn  Esc back"}</Text>
             </Box>
           ) : null}
         </Box>
