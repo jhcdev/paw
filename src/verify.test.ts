@@ -44,7 +44,79 @@ describe("Verifier", () => {
       verifier.trackChange("src/foo.ts", "write", undefined, "const x = 1;");
 
       await verifier.verify();
-      expect(multi.ask).toHaveBeenCalledWith("ollama", expect.any(String));
+      expect(multi.ask).toHaveBeenCalledWith("ollama", expect.any(String), undefined, undefined);
+    });
+
+    it("uses preferred provider when explicitly set", async () => {
+      const multi = createMockMulti("CONFIDENCE: 90\nISSUES:\nEND", [
+        { name: "anthropic" as ProviderName, model: "claude-sonnet-4-20250514" },
+        { name: "ollama" as ProviderName, model: "llama3" },
+        { name: "codex" as ProviderName, model: "gpt-5.4" },
+      ]);
+      const verifier = new Verifier(multi as any, "anthropic", "/tmp");
+      verifier.setProvider("codex" as ProviderName);
+      verifier.trackChange("src/foo.ts", "write", undefined, "const x = 1;");
+
+      await verifier.verify();
+      expect(multi.ask).toHaveBeenCalledWith("codex", expect.any(String), undefined, undefined);
+    });
+
+    it("getProvider returns the set provider", () => {
+      const multi = createMockMulti("");
+      const verifier = new Verifier(multi as any, "anthropic", "/tmp");
+      expect(verifier.getProvider()).toBeNull();
+      verifier.setProvider("ollama" as ProviderName);
+      expect(verifier.getProvider()).toBe("ollama");
+      verifier.setProvider(null);
+      expect(verifier.getProvider()).toBeNull();
+    });
+
+    it("passes model override to multi.ask when set", async () => {
+      const multi = createMockMulti("CONFIDENCE: 90\nISSUES:\nEND");
+      const verifier = new Verifier(multi as any, "anthropic", "/tmp");
+      verifier.setProvider("ollama" as ProviderName, "llama3:70b");
+      verifier.trackChange("src/foo.ts", "write", undefined, "const x = 1;");
+
+      await verifier.verify();
+      expect(multi.ask).toHaveBeenCalledWith("ollama", expect.any(String), "llama3:70b", undefined);
+      expect(verifier.getModel()).toBe("llama3:70b");
+    });
+
+    it("passes effort override to multi.ask when set", async () => {
+      const multi = createMockMulti("CONFIDENCE: 90\nISSUES:\nEND", [
+        { name: "anthropic" as ProviderName, model: "claude-sonnet-4-20250514" },
+        { name: "codex" as ProviderName, model: "gpt-5.4" },
+      ]);
+      const verifier = new Verifier(multi as any, "anthropic", "/tmp");
+      verifier.setProvider("codex" as ProviderName, "gpt-5.4", "high");
+      verifier.trackChange("src/foo.ts", "write", undefined, "const x = 1;");
+
+      await verifier.verify();
+      expect(multi.ask).toHaveBeenCalledWith("codex", expect.any(String), "gpt-5.4", "high");
+      expect(verifier.getEffort()).toBe("high");
+    });
+
+    it("clears model when provider set to null", () => {
+      const multi = createMockMulti("");
+      const verifier = new Verifier(multi as any, "anthropic", "/tmp");
+      verifier.setProvider("ollama" as ProviderName, "llama3:70b");
+      expect(verifier.getModel()).toBe("llama3:70b");
+      verifier.setProvider(null);
+      expect(verifier.getModel()).toBeNull();
+      expect(verifier.getProvider()).toBeNull();
+    });
+
+    it("ignores preferred provider if not registered, falls back to auto", async () => {
+      const multi = createMockMulti("CONFIDENCE: 90\nISSUES:\nEND", [
+        { name: "anthropic" as ProviderName, model: "claude" },
+        { name: "ollama" as ProviderName, model: "llama3" },
+      ]);
+      const verifier = new Verifier(multi as any, "anthropic", "/tmp");
+      verifier.setProvider("codex" as ProviderName); // not registered
+      verifier.trackChange("src/foo.ts", "write", undefined, "code");
+
+      await verifier.verify();
+      expect(multi.ask).toHaveBeenCalledWith("ollama", expect.any(String), undefined, undefined);
     });
 
     it("falls back to primary provider when only one is available", async () => {
@@ -55,7 +127,7 @@ describe("Verifier", () => {
       verifier.trackChange("src/foo.ts", "write", undefined, "const x = 1;");
 
       await verifier.verify();
-      expect(multi.ask).toHaveBeenCalledWith("anthropic", expect.any(String));
+      expect(multi.ask).toHaveBeenCalledWith("anthropic", expect.any(String), undefined, undefined);
     });
 
     it("parses confidence score", async () => {

@@ -88,7 +88,7 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/exit", desc: "quit" },
   { name: "/auto", desc: "autonomous agent mode" },
   { name: "/pipe", desc: "feed shell output to AI" },
-  { name: "/verify", desc: "toggle auto-verify after changes" },
+  { name: "/verify", desc: "toggle auto-verify or set provider (/verify ollama)" },
   { name: "/safety", desc: "configure safety guards" },
 ];
 
@@ -135,6 +135,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [activityCursor, setActivityCursor] = useState(0);
   const [activityScroll, setActivityScroll] = useState(0);
   const [statusPanel, setStatusPanel] = useState(false);
+  const [verifyPanel, setVerifyPanel] = useState<"off" | "menu" | "providers" | "models" | "effort">("off");
+  const [verifyPanelProvider, setVerifyPanelProvider] = useState<string>("");
+  const [verifyPanelModels, setVerifyPanelModels] = useState<{ id: string; name: string }[]>([]);
+  const [verifyCursor, setVerifyCursor] = useState(0);
 
   // All input handled in useInput below (no separate useStdin)
 
@@ -199,7 +203,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // ↓ = enter activity selector (below input, when no other panel active)
-    if (key.downArrow && suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && !activityView) {
+    if (key.downArrow && suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && !activityView) {
       const acts = agent.activityLog.getRecent(5);
       if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); return; }
     }
@@ -314,6 +318,95 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
       return;
+    }
+
+    // Verify panel
+    if (verifyPanel !== "off") {
+      if (verifyPanel === "menu") {
+        const menuItems = ["Toggle ON/OFF", "Select reviewer provider", "Auto (use different provider)"];
+        if (key.escape) { setVerifyPanel("off"); return; }
+        if (key.downArrow) { setVerifyCursor((i) => Math.min(i + 1, menuItems.length - 1)); return; }
+        if (key.upArrow) { setVerifyCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          if (verifyCursor === 0) {
+            const next = !agent.isVerifyEnabled();
+            agent.enableVerify(next);
+            const prov = agent.getVerifyProvider();
+            const model = agent.verifier.getModel();
+            const label = prov ? `${prov}${model ? `/${model}` : ""}` : "auto";
+            setEntries((c) => [...c, { role: "system", text: next ? `Auto-verify: ON (reviewer: ${label})` : "Auto-verify: OFF" }]);
+            setVerifyPanel("off");
+          } else if (verifyCursor === 1) {
+            setVerifyPanel("providers");
+            setVerifyCursor(0);
+          } else {
+            agent.setVerifyProvider(null);
+            agent.enableVerify(true);
+            setEntries((c) => [...c, { role: "system", text: "Auto-verify: ON (reviewer: auto)" }]);
+            setVerifyPanel("off");
+          }
+          return;
+        }
+        return;
+      }
+      if (verifyPanel === "providers") {
+        const registered = agent.getMulti().getRegistered();
+        if (key.escape) { setVerifyPanel("menu"); setVerifyCursor(0); return; }
+        if (key.downArrow) { setVerifyCursor((i) => Math.min(i + 1, registered.length - 1)); return; }
+        if (key.upArrow) { setVerifyCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          const selected = registered[verifyCursor];
+          if (selected) {
+            setVerifyPanelProvider(selected.name);
+            getAllFilteredModels(agent.getProviderKeys()).then((all) => {
+              const provModels = all.find((g) => g.provider === selected.name);
+              setVerifyPanelModels(provModels?.models.map((m) => ({ id: m.id, name: m.name })) ?? []);
+              setVerifyPanel("models");
+              setVerifyCursor(0);
+            });
+          }
+          return;
+        }
+        return;
+      }
+      if (verifyPanel === "models") {
+        if (key.escape) { setVerifyPanel("providers"); setVerifyCursor(0); return; }
+        if (key.downArrow) { setVerifyCursor((i) => Math.min(i + 1, verifyPanelModels.length - 1)); return; }
+        if (key.upArrow) { setVerifyCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          const selected = verifyPanelModels[verifyCursor];
+          if (selected) {
+            if (verifyPanelProvider === "codex") {
+              agent.setVerifyProvider(verifyPanelProvider as ProviderName, selected.id);
+              setVerifyPanel("effort");
+              setVerifyCursor(1); // default = medium
+              return;
+            }
+            agent.setVerifyProvider(verifyPanelProvider as ProviderName, selected.id);
+            agent.enableVerify(true);
+            setEntries((c) => [...c, { role: "system", text: `Auto-verify: ON (reviewer: ${verifyPanelProvider}/${selected.id})` }]);
+          }
+          setVerifyPanel("off");
+          return;
+        }
+        return;
+      }
+      if (verifyPanel === "effort") {
+        const efforts = ["low", "medium", "high", "extra_high"] as const;
+        if (key.escape) { setVerifyPanel("models"); setVerifyCursor(0); return; }
+        if (key.downArrow) { setVerifyCursor((i) => Math.min(i + 1, efforts.length - 1)); return; }
+        if (key.upArrow) { setVerifyCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          const selected = efforts[verifyCursor]!;
+          agent.verifier.setEffort(selected);
+          agent.enableVerify(true);
+          const model = agent.verifier.getModel();
+          setEntries((c) => [...c, { role: "system", text: `Auto-verify: ON (reviewer: ${verifyPanelProvider}/${model}, effort: ${selected})` }]);
+          setVerifyPanel("off");
+          return;
+        }
+        return;
+      }
     }
 
     // Settings panel
@@ -476,7 +569,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       exit();
     }
 
-    if (suggestions.length > 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
+    if (suggestions.length > 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off") {
       if (key.downArrow) {
         setSelectedIdx((i) => Math.min(i + 1, suggestions.length - 1));
         return;
@@ -504,7 +597,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // Enter to submit (inputRef synced synchronously — IME double-fire sees empty ref and exits)
-    if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off") {
+    if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off") {
       const value = inputRef.current;
       if (!value.trim()) return;
       inputRef.current = "";
@@ -1080,12 +1173,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         }
       // ── verify ──
       if (line === "/verify") {
-        const next = !agent.isVerifyEnabled();
-        agent.enableVerify(next);
-        setEntries((c) => [...c,
-          { role: "user", text: line },
-          { role: "system", text: next ? "Auto-verify: ON" : "Auto-verify: OFF" },
-        ]);
+        setVerifyPanel("menu");
+        setVerifyCursor(0);
         return;
       }
 
@@ -1327,6 +1416,77 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                     {i === modelCursor ? " > " : "   "}
                   </Text>
                   <Text color={i === modelCursor ? "#ff9c73" : "gray"}>{label}</Text>
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+        </Box>
+      ) : null}
+
+      {verifyPanel !== "off" ? (
+        <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+          <Text color="#ff9c73" bold>Verify Settings</Text>
+          <Text color="gray">Status: <Text bold color="white">{agent.isVerifyEnabled() ? "ON" : "OFF"}</Text>
+          {" "}Reviewer: <Text bold color="white">{agent.getVerifyProvider() ? `${agent.getVerifyProvider()}${agent.verifier.getModel() ? `/${agent.verifier.getModel()}` : ""}` : "auto"}</Text></Text>
+
+          {verifyPanel === "menu" ? (
+            <Box flexDirection="column" marginTop={1}>
+              {["Toggle ON/OFF", "Select reviewer provider", "Auto (use different provider)"].map((item, i) => (
+                <Box key={item}>
+                  <Text color={i === verifyCursor ? "#ff9c73" : "gray"} bold={i === verifyCursor}>
+                    {i === verifyCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === verifyCursor ? "#ff9c73" : "#ffb088"}>{item}</Text>
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+
+          {verifyPanel === "providers" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select reviewer provider:</Text>
+              {agent.getMulti().getRegistered().map((p, i) => (
+                <Box key={p.name}>
+                  <Text color={i === verifyCursor ? "#ff9c73" : "gray"} bold={i === verifyCursor}>
+                    {i === verifyCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === verifyCursor ? "#ff9c73" : "#ffb088"}>{p.name}</Text>
+                  <Text color="gray"> — {p.model}</Text>
+                  {p.name === agent.getVerifyProvider() ? <Text color="green"> (reviewer)</Text> : null}
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+
+          {verifyPanel === "models" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select model for <Text bold color="#ffb088">{verifyPanelProvider}</Text>:</Text>
+              {verifyPanelModels.map((m, i) => (
+                <Box key={m.id}>
+                  <Text color={i === verifyCursor ? "#ff9c73" : "gray"} bold={i === verifyCursor}>
+                    {i === verifyCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === verifyCursor ? "#ff9c73" : "gray"}>{m.id}</Text>
+                  <Text color="gray"> — {m.name}</Text>
+                  {m.id === agent.verifier.getModel() ? <Text color="green"> *</Text> : null}
+                </Box>
+              ))}
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>
+            </Box>
+          ) : null}
+
+          {verifyPanel === "effort" ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="gray" italic>Select effort level for <Text bold color="#ffb088">{verifyPanelProvider}/{agent.verifier.getModel()}</Text>:</Text>
+              {(["Low — Fast, lighter reasoning", "Medium — Balanced (default)", "High — Complex problems", "Extra High — Maximum depth"] as const).map((label, i) => (
+                <Box key={label}>
+                  <Text color={i === verifyCursor ? "#ff9c73" : "gray"} bold={i === verifyCursor}>
+                    {i === verifyCursor ? " > " : "   "}
+                  </Text>
+                  <Text color={i === verifyCursor ? "#ff9c73" : "gray"}>{label}</Text>
                 </Box>
               ))}
               <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc back"}</Text>

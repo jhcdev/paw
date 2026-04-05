@@ -63,9 +63,27 @@ export class MultiProvider {
     return entry ? { apiKey: entry.apiKey, model: entry.model, baseUrl: entry.baseUrl } : null;
   }
 
-  /** Ask a single provider (one-shot, no history) */
-  async ask(provider: ProviderName, prompt: string): Promise<AgentTurnResult> {
+  /** Ask a single provider (one-shot, no history). Optionally override model and effort. */
+  async ask(provider: ProviderName, prompt: string, model?: string, effort?: string): Promise<AgentTurnResult> {
+    if (model) {
+      const entry = this.providers.get(provider);
+      if (!entry) throw new Error(`Provider "${provider}" not configured.`);
+      const instance = createProvider({
+        provider: entry.provider,
+        apiKey: entry.apiKey,
+        model,
+        cwd: this.cwd,
+        baseUrl: entry.baseUrl,
+      });
+      if (effort && "setEffort" in instance && typeof (instance as any).setEffort === "function") {
+        (instance as any).setEffort(effort);
+      }
+      return instance.runTurn(prompt);
+    }
     const instance = this.getOrCreate(provider);
+    if (effort && "setEffort" in instance && typeof (instance as any).setEffort === "function") {
+      (instance as any).setEffort(effort);
+    }
     return instance.runTurn(prompt);
   }
 

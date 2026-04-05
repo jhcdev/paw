@@ -91,12 +91,38 @@ export class Verifier {
   private changes: TrackedChange[] = [];
   private multi: MultiProvider;
   private primaryProvider: ProviderName;
+  private preferredProvider: ProviderName | null = null;
+  private preferredModel: string | null = null;
+  private preferredEffort: string | null = null;
   private cwd: string;
 
   constructor(multi: MultiProvider, primaryProvider: ProviderName, cwd: string) {
     this.multi = multi;
     this.primaryProvider = primaryProvider;
     this.cwd = cwd;
+  }
+
+  /** Set a specific provider/model/effort to use for verification. Pass null to auto-select. */
+  setProvider(provider: ProviderName | null, model?: string | null, effort?: string | null): void {
+    this.preferredProvider = provider;
+    this.preferredModel = model ?? null;
+    this.preferredEffort = effort ?? null;
+  }
+
+  getProvider(): ProviderName | null {
+    return this.preferredProvider;
+  }
+
+  getModel(): string | null {
+    return this.preferredModel;
+  }
+
+  getEffort(): string | null {
+    return this.preferredEffort;
+  }
+
+  setEffort(effort: string | null): void {
+    this.preferredEffort = effort;
   }
 
   trackChange(file: string, type: "write" | "edit", oldContent?: string, newContent?: string): void {
@@ -106,14 +132,19 @@ export class Verifier {
   async verify(): Promise<VerifyResult> {
     const start = Date.now();
     const registered = this.multi.getRegistered();
-    const alt = registered.find((r) => r.name !== this.primaryProvider);
-    const reviewerName = alt ? alt.name : this.primaryProvider;
+    let reviewerName: ProviderName;
+    if (this.preferredProvider && registered.some((r) => r.name === this.preferredProvider)) {
+      reviewerName = this.preferredProvider;
+    } else {
+      const alt = registered.find((r) => r.name !== this.primaryProvider);
+      reviewerName = alt ? alt.name : this.primaryProvider;
+    }
     const fallbackFile = this.changes[0]?.file ?? "unknown";
 
     const prompt = buildReviewPrompt(this.changes);
 
     try {
-      const result = await this.multi.ask(reviewerName, prompt);
+      const result = await this.multi.ask(reviewerName, prompt, this.preferredModel ?? undefined, this.preferredEffort ?? undefined);
       const { confidence, issues } = parseResponse(result.text, fallbackFile);
       const hasErrors = issues.some((i) => i.severity === "error");
       return {

@@ -200,6 +200,14 @@ export class CodingAgent {
     return this.verifyEnabled;
   }
 
+  setVerifyProvider(provider: ProviderName | null, model?: string | null, effort?: string | null): void {
+    this.verifier.setProvider(provider, model, effort);
+  }
+
+  getVerifyProvider(): ProviderName | null {
+    return this.verifier.getProvider();
+  }
+
   setSafetyConfig(config: Partial<SafetyConfig>): void {
     this.safetyConfig = { ...this.safetyConfig, ...config };
     if ("setSafetyConfig" in this.provider && typeof (this.provider as any).setSafetyConfig === "function") {
