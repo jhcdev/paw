@@ -88,6 +88,8 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/exit", desc: "quit" },
   { name: "/auto", desc: "autonomous agent mode" },
   { name: "/pipe", desc: "feed shell output to AI" },
+  { name: "/verify", desc: "toggle auto-verify after changes" },
+  { name: "/safety", desc: "configure safety guards" },
 ];
 
 function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions }) {
@@ -1076,6 +1078,45 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           }
           return;
         }
+      // ── verify ──
+      if (line === "/verify") {
+        const next = !agent.isVerifyEnabled();
+        agent.enableVerify(next);
+        setEntries((c) => [...c,
+          { role: "user", text: line },
+          { role: "system", text: next ? "Auto-verify: ON" : "Auto-verify: OFF" },
+        ]);
+        return;
+      }
+
+      // ── safety ──
+      if (line === "/safety" || line.startsWith("/safety ")) {
+        const arg = line.slice("/safety".length).trim();
+        if (arg === "off") {
+          agent.setSafetyConfig({ enabled: false });
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Safety: OFF | All guards disabled." }]);
+        } else if (arg === "on") {
+          agent.setSafetyConfig({ enabled: true });
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Safety: ON | Auto-checkpoint: ON | Block critical: ON" }]);
+        } else {
+          const cfg = agent.getSafetyConfig();
+          setEntries((c) => [...c,
+            { role: "user", text: line },
+            { role: "system", text: [
+              `Safety: ${cfg.enabled ? "ON" : "OFF"} | Auto-checkpoint: ${cfg.autoCheckpoint ? "ON" : "OFF"} | Block critical: ${cfg.blockCritical ? "ON" : "OFF"}`,
+              "",
+              "Commands:",
+              "  /safety on   - enable all safety guards",
+              "  /safety off  - disable all safety guards",
+              "",
+              "High-risk shell commands (rm, git reset, docker rm, etc.) are blocked and require explicit confirmation.",
+              "Critical commands (rm -rf /, mkfs, fork bombs, etc.) are always blocked when blockCritical is on.",
+            ].join("\n") },
+          ]);
+        }
+        return;
+      }
+
         setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Unknown command: ${line}\nType /help for commands or /skills for skills.` }]);
         return;
       }

@@ -1,7 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { MessageParam, ToolResultBlockParam } from "@anthropic-ai/sdk/resources/messages";
-import { toolDefinitions, toolHandlers } from "../tools.js";
+import { toolDefinitions, toolHandlers, createSafeHandlers } from "../tools.js";
 import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler, TokenUsage } from "../types.js";
+import type { SafetyConfig } from "../safety.js";
 
 const SYSTEM_PROMPT = `You are Paw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
 
@@ -12,6 +13,7 @@ export class AnthropicProvider implements LlmProvider {
   private readonly messages: MessageParam[] = [];
   private extraTools: ToolDefinition[] = [];
   private extraHandlers: Record<string, ToolHandler> = {};
+  private safetyConfig: SafetyConfig = { enabled: true, autoCheckpoint: true, blockCritical: true };
 
   constructor(args: { apiKey: string; model: string; cwd: string }) {
     this.client = new Anthropic({ apiKey: args.apiKey });
@@ -24,13 +26,18 @@ export class AnthropicProvider implements LlmProvider {
     Object.assign(this.extraHandlers, handlers);
   }
 
+  setSafetyConfig(config: SafetyConfig): void {
+    this.safetyConfig = config;
+  }
+
   clear(): void { this.messages.length = 0; }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
     this.messages.push({ role: "user", content: prompt });
     let assistantText = "";
     const allTools = [...toolDefinitions, ...this.extraTools];
-    const allHandlers = { ...toolHandlers, ...this.extraHandlers };
+    const baseHandlers = { ...toolHandlers, ...this.extraHandlers };
+    const allHandlers = createSafeHandlers(this.cwd, this.safetyConfig, baseHandlers);
     const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
     for (let i = 0; i < 10; i++) {

@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { ToolDefinition, ToolHandler, ToolResult } from "./types.js";
+import { classifyRisk, createCheckpoint, type SafetyConfig } from "./safety.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -101,8 +102,20 @@ async function searchText(input: Record<string, unknown>, cwd: string): Promise<
 }
 
 const BLOCKED_COMMANDS = [
-  /rm\s+-rf\s+\//, /mkfs/, /dd\s+if=/, /:\(\)\{/, /shutdown/, /reboot/,
-  /chmod\s+777/, />\s*\/dev\/sd/, /curl.*\|\s*sh/, /wget.*\|\s*sh/,
+  // Original critical blocks
+  /rm\s+-[a-z]*r[a-z]*f?\s+\/[^/\s]{0,3}(?:\s|$)/i,
+  /rm\s+-[a-z]*f[a-z]*r?\s+\/[^/\s]{0,3}(?:\s|$)/i,
+  /mkfs/i,
+  /dd\s+if=/i,
+  /:\(\)\s*\{/,
+  /shutdown/i,
+  /reboot/i,
+  />\s*\/dev\/sd/i,
+  /curl[^|]*\|\s*(?:ba)?sh/i,
+  /wget[^|]*\|\s*(?:ba)?sh/i,
+  // Additional critical patterns
+  /chmod\s+777/i,
+  /\bformat\s+[cC]:/,                          // Windows drive format
 ];
 
 async function runShell(input: Record<string, unknown>, cwd: string): Promise<ToolResult> {
@@ -291,3 +304,79 @@ export const toolHandlers: Record<string, ToolHandler> = {
   glob: globFiles,
   web_fetch: webFetch,
 };
+
+/**
+ * Returns a set of tool handlers wrapped with safety classification.
+ * HIGH risk commands are blocked with an informative error (the AI will relay this to the user).
+ * CRITICAL risk commands are blocked outright.
+ * LOW/MEDIUM commands pass through unchanged.
+ */
+export function createSafeHandlers(
+  cwd: string,
+  config: SafetyConfig,
+  baseHandlers: Record<string, ToolHandler> = toolHandlers,
+): Record<string, ToolHandler> {
+  if (!config.enabled) return baseHandlers;
+
+  const wrapped: Record<string, ToolHandler> = {};
+  for (const [name, handler] of Object.entries(baseHandlers)) {
+    wrapped[name] = async (input: Record<string, unknown>, handlerCwd: string): Promise<ToolResult> => {
+      const check = classifyRisk(name, input);
+
+      if (check.level === "critical" && config.blockCritical) {
+        return {
+          content: `[SAFETY BLOCK] This operation was blocked because it matches a critical-risk pattern.\nReason: ${check.reason}\nTo proceed, the user must explicitly disable safety checks with /safety off.`,
+          isError: true,
+        };
+      }
+
+      if (check.level === "high") {
+        if (config.autoCheckpoint) {
+          await createCheckpoint(handlerCwd || cwd).catch(() => {/* best-effort */});
+        }
+        // Block with informative message so the AI can inform the user
+        return {
+          content: `[SAFETY BLOCK] This operation requires explicit user confirmation because it is high-risk.\nReason: ${check.reason}\nInform the user what this command will do and ask them to confirm by re-issuing the request or disabling safety with /safety off.`,
+          isError: true,
+        };
+      }
+
+      return handler(input, handlerCwd);
+    };
+  }
+  return wrapped;
+}
+
+export type FileChangeCallback = (file: string, type: "write" | "edit", oldContent?: string, newContent?: string) => void;
+
+export function createTrackedHandlers(cwd: string, onFileChange: FileChangeCallback): Record<string, ToolHandler> {
+  return {
+    ...toolHandlers,
+    write_file: async (input, handlerCwd) => {
+      const result = await writeFile(input, handlerCwd);
+      if (!result.isError && typeof input.path === "string" && typeof input.content === "string") {
+        onFileChange(input.path, "write", undefined, input.content);
+      }
+      return result;
+    },
+    edit_file: async (input, handlerCwd) => {
+      // Read old content before editing
+      let oldContent: string | undefined;
+      let newContent: string | undefined;
+      if (typeof input.path === "string") {
+        try {
+          const fullPath = path.resolve(handlerCwd, input.path);
+          oldContent = await fs.readFile(fullPath, "utf8");
+        } catch { /* ignore */ }
+      }
+      const result = await editFile(input, handlerCwd);
+      if (!result.isError && typeof input.path === "string") {
+        if (oldContent !== undefined && typeof input.old_string === "string" && typeof input.new_string === "string") {
+          newContent = oldContent.replace(input.old_string, input.new_string);
+        }
+        onFileChange(input.path, "edit", oldContent, newContent);
+      }
+      return result;
+    },
+  };
+}

@@ -5,7 +5,9 @@ import { MultiProvider, detectProviders } from "./multi-provider.js";
 import { TeamRunner, autoConfigureTeam } from "./team.js";
 import { createProvider } from "./providers/index.js";
 import { HookManager } from "./hooks.js";
+import { Verifier } from "./verify.js";
 import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage } from "./types.js";
+import type { SafetyConfig } from "./safety.js";
 
 export class CodingAgent {
   private provider: LlmProvider;
@@ -19,8 +21,11 @@ export class CodingAgent {
   private mcpReady = false;
   private totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   private detectedProviders?: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[];
+  private verifyEnabled = false;
+  private safetyConfig: SafetyConfig = { enabled: true, autoCheckpoint: true, blockCritical: true };
   readonly tracker = new UsageTracker();
   readonly activityLog = new ActivityLog();
+  readonly verifier: Verifier;
 
   constructor(args: { provider: ProviderName; apiKey: string; model: string; cwd: string; baseUrl?: string; detected?: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[] }) {
     this.mcpManager = new McpManager();
@@ -33,6 +38,7 @@ export class CodingAgent {
     this.team = new TeamRunner(args.cwd);
     this.hooks = new HookManager(args.cwd);
     this.detectedProviders = args.detected;
+    this.verifier = new Verifier(this.multi, args.provider, args.cwd);
   }
 
   async initTeam(): Promise<void> {
@@ -96,6 +102,29 @@ export class CodingAgent {
       await this.hooks.run("post-turn", { response: result.text }).catch(() => {});
       this.activityLog.log(actId, "response", result.text);
       this.activityLog.finish(actId, result.text.slice(0, 100));
+
+      if (this.verifyEnabled && this.verifier.hasPendingChanges()) {
+        const vr = await this.verifier.verify().catch(() => null);
+        this.verifier.clear();
+        if (vr) {
+          const lines: string[] = [
+            "---",
+            `Verification (by ${vr.provider}):`,
+            `  Confidence: ${vr.confidence}/100`,
+          ];
+          if (vr.issues.length === 0) {
+            lines.push("  No issues found");
+          } else {
+            for (const issue of vr.issues) {
+              const prefix = issue.severity === "error" ? "[error]" : issue.severity === "warning" ? "[warn] " : "[info] ";
+              lines.push(`  ${prefix} ${issue.file}: ${issue.description}`);
+            }
+          }
+          lines.push("---");
+          return { ...result, text: result.text + "\n" + lines.join("\n") };
+        }
+      }
+
       return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -161,6 +190,25 @@ export class CodingAgent {
       return (this.provider as any).getEffort();
     }
     return "medium";
+  }
+
+  enableVerify(enabled: boolean): void {
+    this.verifyEnabled = enabled;
+  }
+
+  isVerifyEnabled(): boolean {
+    return this.verifyEnabled;
+  }
+
+  setSafetyConfig(config: Partial<SafetyConfig>): void {
+    this.safetyConfig = { ...this.safetyConfig, ...config };
+    if ("setSafetyConfig" in this.provider && typeof (this.provider as any).setSafetyConfig === "function") {
+      (this.provider as any).setSafetyConfig(this.safetyConfig);
+    }
+  }
+
+  getSafetyConfig(): SafetyConfig {
+    return { ...this.safetyConfig };
   }
 
   /** Switch the active provider and model. Returns true if successful. */
