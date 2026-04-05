@@ -189,9 +189,13 @@ Spawn independent agents that work in parallel. Works even while AI is thinking.
 **Inline (fast):**
 
 ```
-/spawn add tests for auth               ← round-robin provider
+/spawn add tests for auth               ← uses current active model
 /spawn codex/gpt-5.4 update README      ← specific provider + model
 ```
+
+**Defaults:** Spawn uses your current `/model` selection. Change the model mid-session and spawns follow automatically.
+
+**Session context:** Every spawned agent receives the last 10 conversation entries, so it understands what you're working on — no need to repeat context.
 
 **Manage:**
 
