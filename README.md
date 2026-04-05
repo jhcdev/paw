@@ -2,13 +2,11 @@
 
 ```
   /\_/\   Paw
- ( o.o )  Scratch your code into shape~
+ ( o.o )  One terminal. Every AI. No lock-in.
   > ^ <
 ```
 
-**One terminal. Every AI model. No lock-in.**
-
-Paw is an independent, multi-provider AI coding agent that runs Anthropic, OpenAI, and local models from a single CLI — with automatic fallback, parallel sub-agents, and built-in safety.
+Multi-provider AI coding agent that runs Anthropic, OpenAI, and local models from a single CLI — with automatic fallback, parallel sub-agents, and built-in safety.
 
 ![Paw Terminal](assets/screenshot.png)
 
