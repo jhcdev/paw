@@ -185,6 +185,7 @@ export class McpManager {
           ...(config.env ?? {}),
         },
         cwd,
+        stderr: "pipe", // Prevent MCP server stderr from leaking into terminal
       });
     }
 

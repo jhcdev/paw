@@ -794,6 +794,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
   });
 
+  // Terminal cursor hidden in startRepl() — █ serves as visual cursor
+
   const sidebarLines = useMemo(
     () => [
       "  ~( Tips )~",
@@ -2236,8 +2238,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       <Box borderStyle="round" borderColor="#d97757" paddingX={1}>
         <Text color="#ff9c73" bold>{" > "}</Text>
-        <Text>{[...input].slice(0, cursorPos).join("")}</Text><Text color="#ff9c73">█</Text><Text>{[...input].slice(cursorPos).join("")}</Text></Box>
-      <Text color="gray" italic> Esc to quit | /help for commands</Text>
+        <Text>{[...input].slice(0, cursorPos).join("")}</Text><Text color="#ff9c73">█</Text><Text>{[...input].slice(cursorPos).join("")}</Text>
+      </Box>
+
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
         <Text color={mode === "team" ? "#ff9c73" : "gray"}>{mode === "team" ? "TEAM" : providerLabel}/{agent.getActiveModel()}</Text>
         <Text color="gray">{(() => {
@@ -2298,7 +2301,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         </Box>
       ) : null}
 
-      {!activityView && agent.activityLog.getRunning().length > 0 ? (
+      {!activityView && turnCount > 0 && agent.activityLog.getRunning().length > 0 ? (
         <Box flexDirection="column" paddingX={2}>
           {agent.activityLog.getRunning().map((act) => (
             <Box key={act.id} flexDirection="row">
@@ -2327,11 +2330,15 @@ function openTtyStdin(): tty.ReadStream | undefined {
 export async function startRepl(agent: CodingAgent, options: StartReplOptions): Promise<void> {
   agent.loadMemoryContext().catch(() => {});
   agent.getHooks().run("session-start", { source: "startup" }).catch(() => []);
+  // Hide terminal cursor before Ink starts — we use █ as visual cursor
+  process.stderr.write("\x1B[?25l");
   const ttyStdin = openTtyStdin();
   const instance = render(<App agent={agent} options={options} />, {
     ...(ttyStdin ? { stdin: ttyStdin } : {}),
   });
   await instance.waitUntilExit();
   ttyStdin?.destroy();
+  // Restore terminal cursor after Ink exits
+  process.stderr.write("\x1B[?25h");
   agent.getHooks().run("session-end", { source: "exit" }).catch(() => []);
 }
