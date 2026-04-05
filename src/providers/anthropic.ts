@@ -43,7 +43,7 @@ export class AnthropicProvider implements LlmProvider {
 
   clear(): void { this.messages.length = 0; }
 
-  async runTurn(prompt: string): Promise<AgentTurnResult> {
+  async runTurn(prompt: string, onChunk?: (chunk: string) => void): Promise<AgentTurnResult> {
     this.messages.push({ role: "user", content: prompt });
     let assistantText = "";
     const allTools = [...toolDefinitions, ...this.extraTools];
@@ -52,16 +52,35 @@ export class AnthropicProvider implements LlmProvider {
     const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
     for (let i = 0; i < 10; i++) {
-      const response = await this.client.messages.create({
-        model: this.model, max_tokens: 4096, system: SYSTEM_PROMPT,
-        messages: this.messages, tools: allTools,
-      });
-      totalUsage.inputTokens += response.usage.input_tokens;
-      totalUsage.outputTokens += response.usage.output_tokens;
-      this.messages.push({ role: "assistant", content: response.content });
+      if (onChunk) {
+        // Streaming mode
+        const stream = this.client.messages.stream({
+          model: this.model, max_tokens: 4096, system: SYSTEM_PROMPT,
+          messages: this.messages, tools: allTools,
+        });
 
-      const textBlocks = response.content.filter((b) => b.type === "text");
-      if (textBlocks.length > 0) assistantText = textBlocks.map((b) => b.text).join("\n");
+        stream.on("text", (text) => { onChunk(text); });
+
+        const response = await stream.finalMessage();
+        totalUsage.inputTokens += response.usage.input_tokens;
+        totalUsage.outputTokens += response.usage.output_tokens;
+        this.messages.push({ role: "assistant", content: response.content });
+
+        const textBlocks = response.content.filter((b) => b.type === "text");
+        if (textBlocks.length > 0) assistantText = textBlocks.map((b) => b.text).join("\n");
+      } else {
+        // Non-streaming mode
+        const response = await this.client.messages.create({
+          model: this.model, max_tokens: 4096, system: SYSTEM_PROMPT,
+          messages: this.messages, tools: allTools,
+        });
+        totalUsage.inputTokens += response.usage.input_tokens;
+        totalUsage.outputTokens += response.usage.output_tokens;
+        this.messages.push({ role: "assistant", content: response.content });
+
+        const textBlocks = response.content.filter((b) => b.type === "text");
+        if (textBlocks.length > 0) assistantText = textBlocks.map((b) => b.text).join("\n");
+      }
 
       const toolUses = response.content.filter((b) => b.type === "tool_use");
       if (toolUses.length === 0) return { text: assistantText, usage: totalUsage };

@@ -41,13 +41,78 @@ export class OpenAIProvider implements LlmProvider {
     this.messages.push({ role: "system", content: SYSTEM_PROMPT });
   }
 
-  async runTurn(prompt: string): Promise<AgentTurnResult> {
+  async runTurn(prompt: string, onChunk?: (chunk: string) => void): Promise<AgentTurnResult> {
     this.messages.push({ role: "user", content: prompt });
     let assistantText = "";
     const allHandlers = { ...toolHandlers, ...this.extraHandlers };
     const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
     for (let i = 0; i < 10; i++) {
+      if (onChunk) {
+        // Streaming mode
+        const stream = await this.client.chat.completions.create({
+          model: this.model,
+          messages: this.messages,
+          tools: toOpenAITools(this.extraTools),
+          max_tokens: 4096,
+          stream: true,
+        });
+
+        let content = "";
+        const toolCalls: { id: string; name: string; arguments: string }[] = [];
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta;
+          if (!delta) continue;
+          if (delta.content) {
+            content += delta.content;
+            onChunk(delta.content);
+          }
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              if (tc.index !== undefined) {
+                while (toolCalls.length <= tc.index) toolCalls.push({ id: "", name: "", arguments: "" });
+                if (tc.id) toolCalls[tc.index].id = tc.id;
+                if (tc.function?.name) toolCalls[tc.index].name = tc.function.name;
+                if (tc.function?.arguments) toolCalls[tc.index].arguments += tc.function.arguments;
+              }
+            }
+          }
+          if (chunk.usage) {
+            totalUsage.inputTokens += chunk.usage.prompt_tokens ?? 0;
+            totalUsage.outputTokens += chunk.usage.completion_tokens ?? 0;
+          }
+        }
+
+        if (content) assistantText = content;
+        const message: any = { role: "assistant" as const, content: content || null };
+        if (toolCalls.length > 0) {
+          message.tool_calls = toolCalls.map(tc => ({
+            id: tc.id, type: "function" as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          }));
+        }
+        this.messages.push(message);
+
+        if (toolCalls.length === 0) return { text: assistantText, usage: totalUsage };
+
+        for (const toolCall of toolCalls) {
+          const handler = allHandlers[toolCall.name];
+          if (!handler) {
+            this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: `Unknown tool: ${toolCall.name}` });
+            continue;
+          }
+          try {
+            const args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
+            const result = await handler(args, this.cwd);
+            this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: result.content });
+          } catch (error) {
+            this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: error instanceof Error ? error.message : String(error) });
+          }
+        }
+        continue;
+      }
+
+      // Non-streaming mode
       const response = await this.client.chat.completions.create({
         model: this.model,
         messages: this.messages,

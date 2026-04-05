@@ -53,7 +53,7 @@ export class CodexProvider implements LlmProvider {
     return `[Previous conversation]\n${contextLines.join("\n")}\n\n[Current message]\n${prompt}`;
   }
 
-  async runTurn(prompt: string): Promise<AgentTurnResult> {
+  async runTurn(prompt: string, onChunk?: (chunk: string) => void): Promise<AgentTurnResult> {
     const fullPrompt = this.buildPromptWithHistory(prompt);
     this.history.push({ role: "user", text: prompt });
 
@@ -75,7 +75,11 @@ export class CodexProvider implements LlmProvider {
       let stdout = "";
       let stderr = "";
 
-      child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
+      child.stdout.on("data", (data: Buffer) => {
+        const chunk = data.toString();
+        stdout += chunk;
+        if (onChunk) onChunk(chunk);
+      });
       child.stderr.on("data", (data: Buffer) => { stderr += data.toString(); });
 
       const timeout = setTimeout(() => {

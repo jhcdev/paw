@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import tty from "node:tty";
 import { promisify } from "node:util";
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import { Box, Newline, render, Text, useApp, useInput } from "ink";
 
 import type { CodingAgent } from "./agent.js";
@@ -19,6 +19,9 @@ import { AutoAgent } from "./auto-agent.js";
 import { PipeAgent } from "./pipe-agent.js";
 import { SpawnManager } from "./spawn-agent.js";
 import { loadMemory, appendMemory, formatMemoryInfo } from "./memory.js";
+import { cursorManager } from "./cursor-manager.js";
+import { Cursor, pushToKillRing, getLastKill, resetKillAccumulation } from "./cursor.js";
+import { countLinesBelowInput, measureImeColumn } from "./ime-cursor.js";
 
 const execAsync = promisify(exec);
 
@@ -138,6 +141,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const inputRef = React.useRef("");
   const [cancelRef] = useState({ current: false });
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
+  const [streamingText, setStreamingText] = useState("");
   const [pendingDisplay, setPendingDisplay] = useState<string[]>([]);
   const [turnCount, setTurnCount] = useState(0);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -754,47 +758,134 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
 
-    // Left/Right arrow — move cursor within input
-    if (key.leftArrow && !key.ctrl && !key.meta) {
-      cursorRef.current = Math.max(0, cursorRef.current - 1);
-      setCursorPos(cursorRef.current);
+    // Build cursor for all input operations
+    const cursor = Cursor.fromText(inputRef.current, process.stdout.columns ?? 80, cursorRef.current);
+
+    // Ctrl+A = start of line
+    if (key.ctrl && ch === "a") {
+      const c = cursor.startOfLine();
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
       return;
     }
-    if (key.rightArrow && !key.ctrl && !key.meta) {
-      cursorRef.current = Math.min([...inputRef.current].length, cursorRef.current + 1);
-      setCursorPos(cursorRef.current);
+    // Ctrl+E = end of line
+    if (key.ctrl && ch === "e") {
+      const c = cursor.endOfLine();
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      return;
+    }
+    // Ctrl+D = delete forward
+    if (key.ctrl && ch === "d") {
+      const c = cursor.del();
+      inputRef.current = c.text;
+      setInput(c.text);
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      resetKillAccumulation();
+      return;
+    }
+    // Ctrl+K = kill to end of line
+    if (key.ctrl && ch === "k") {
+      const { cursor: c, killed } = cursor.deleteToLineEnd();
+      if (killed) pushToKillRing(killed, "append");
+      inputRef.current = c.text;
+      setInput(c.text);
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      return;
+    }
+    // Ctrl+U = kill to start of line
+    if (key.ctrl && ch === "u") {
+      const { cursor: c, killed } = cursor.deleteToLineStart();
+      if (killed) pushToKillRing(killed, "prepend");
+      inputRef.current = c.text;
+      setInput(c.text);
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      return;
+    }
+    // Ctrl+W = kill word before cursor
+    if (key.ctrl && ch === "w") {
+      const { cursor: c, killed } = cursor.deleteWordBefore();
+      if (killed) pushToKillRing(killed, "prepend");
+      inputRef.current = c.text;
+      setInput(c.text);
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      return;
+    }
+    // Ctrl+Y = yank (paste from kill ring)
+    if (key.ctrl && ch === "y") {
+      const text = getLastKill();
+      if (text) {
+        const c = cursor.insert(text);
+        inputRef.current = c.text;
+        setInput(c.text);
+        cursorRef.current = c.offset;
+        setCursorPos(c.offset);
+      }
+      resetKillAccumulation();
       return;
     }
 
-    // Backspace — delete character before cursor
+    // Left/Right arrow — move cursor within input (grapheme-aware)
+    if (key.leftArrow && !key.ctrl && !key.meta) {
+      const c = cursor.left();
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      return;
+    }
+    if (key.rightArrow && !key.ctrl && !key.meta) {
+      const c = cursor.right();
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      return;
+    }
+
+    // Backspace — delete character before cursor (grapheme-aware)
     if (key.backspace || key.delete) {
-      const chars = [...inputRef.current];
-      const pos = Math.min(chars.length, cursorRef.current);
-      if (pos <= 0) return;
-      chars.splice(pos - 1, 1);
-      const val = chars.join("");
-      inputRef.current = val;
-      cursorRef.current = pos - 1;
-      setInput(val);
-      setCursorPos(cursorRef.current);
+      const c = cursor.backspace();
+      inputRef.current = c.text;
+      setInput(c.text);
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      resetKillAccumulation();
       return;
     }
 
     // Regular character input (including Korean/CJK) — insert at cursor
     if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
-      const chars = [...inputRef.current];
-      const pos = Math.min(chars.length, cursorRef.current);
-      chars.splice(pos, 0, ch);
-      const next = chars.join("");
-      inputRef.current = next;
-      cursorRef.current = pos + 1;
-      setInput(next);
-      setCursorPos(cursorRef.current);
-      if (next.startsWith("/")) setSelectedIdx(0);
+      const c = cursor.insert(ch);
+      inputRef.current = c.text;
+      setInput(c.text);
+      cursorRef.current = c.offset;
+      setCursorPos(c.offset);
+      resetKillAccumulation();
+      if (c.text.startsWith("/")) setSelectedIdx(0);
     }
   });
 
-  // Terminal cursor hidden in startRepl() — █ serves as visual cursor
+  // Reposition terminal cursor at input field for Korean/CJK IME composition.
+  // Calculate linesUp dynamically based on what renders below the input box.
+  useLayoutEffect(() => {
+    const chars = [...inputRef.current];
+    const textBefore = chars.slice(0, cursorRef.current).join("");
+    const col = measureImeColumn(textBefore);
+    const runningActivityCount = turnCount > 0 ? agent.activityLog.getRunning().length : 0;
+    const activityLogCount = activityView && activityView !== "__select__"
+      ? Math.min(agent.activityLog.getById(activityView)?.logs.length ?? 0, 5)
+      : 0;
+    const linesBelow = countLinesBelowInput({
+      activitySelectorCount: activityView === "__select__" ? agent.activityLog.getRecent(5).length : 0,
+      activityLogCount,
+      runningActivityCount,
+      isViewingActivitySelector: activityView === "__select__",
+      isViewingActivityDetail: Boolean(activityView && activityView !== "__select__"),
+    });
+
+    cursorManager.setCursorPosition(linesBelow, col);
+  }, [agent, input, cursorPos, activityView, turnCount, activityVersion]);
 
   const sidebarLines = useMemo(
     () => [
@@ -1636,9 +1727,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setTurnCount((c) => c + 1);
           setEntries((c) => [...c, { role: "assistant", text: output }]);
         } else {
-          // Solo mode
+          // Solo mode — stream response in real-time
           setThinkMsg(randomCatMood());
-          const result = await agent.runTurn(enrichedLine);
+          setStreamingText("");
+          const result = await agent.runTurn(enrichedLine, (chunk) => {
+            setStreamingText((prev) => prev + chunk);
+          });
+          setStreamingText("");
           setTurnCount((c) => c + 1);
           setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
           const stopResult = await agent.runStopHook();
@@ -1732,6 +1827,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             <Text color="#ff9c73" bold>{"=^.^= "}</Text>
             <Text color="gray" italic>{thinkMsg}</Text>
           </Box>
+          {streamingText ? (
+            <Box marginLeft={2} flexDirection="column">
+              <Text color="#ffe0cc" wrap="wrap">{streamingText}</Text>
+            </Box>
+          ) : null}
           <Text color="gray" italic>  Ctrl+C or Esc to cancel</Text>
         </Box>
       ) : null}
@@ -2153,22 +2253,35 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         </Box>
       ) : null}
 
-      {suggestions.length > 0 && mcpMode === "off" ? (
-        <Box flexDirection="column" paddingX={2} marginBottom={0}>
-          {suggestions.map((cmd, i) => (
-            <Box key={cmd.name}>
-              <Text color={i === selectedIdx ? "#ff9c73" : "gray"} bold={i === selectedIdx}>
-                {i === selectedIdx ? " > " : "   "}
-              </Text>
-              <Text color={i === selectedIdx ? "#ff9c73" : "gray"} bold={i === selectedIdx}>
-                {cmd.name}
-              </Text>
-              <Text color="gray"> — {cmd.desc}</Text>
-            </Box>
-          ))}
-          <Text color="gray" italic>  Tab to complete | arrows to navigate</Text>
-        </Box>
-      ) : null}
+      {suggestions.length > 0 && mcpMode === "off" ? (() => {
+        const maxVisible = 5;
+        const half = Math.floor(maxVisible / 2);
+        let start = Math.max(0, selectedIdx - half);
+        let end = start + maxVisible;
+        if (end > suggestions.length) { end = suggestions.length; start = Math.max(0, end - maxVisible); }
+        const visible = suggestions.slice(start, end);
+        return (
+          <Box flexDirection="column" paddingX={2} marginBottom={0}>
+            {start > 0 ? <Text color="gray">{`   ↑ ${start} more`}</Text> : null}
+            {visible.map((cmd, vi) => {
+              const i = start + vi;
+              return (
+                <Box key={cmd.name}>
+                  <Text color={i === selectedIdx ? "#ff9c73" : "gray"} bold={i === selectedIdx}>
+                    {i === selectedIdx ? " > " : "   "}
+                  </Text>
+                  <Text color={i === selectedIdx ? "#ff9c73" : "gray"} bold={i === selectedIdx}>
+                    {cmd.name}
+                  </Text>
+                  <Text color="gray"> — {cmd.desc}</Text>
+                </Box>
+              );
+            })}
+            {end < suggestions.length ? <Text color="gray">{`   ↓ ${suggestions.length - end} more`}</Text> : null}
+            <Text color="gray" italic>  Tab to complete | arrows to navigate</Text>
+          </Box>
+        );
+      })() : null}
 
       {statusPanel ? (
         <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
@@ -2330,15 +2443,13 @@ function openTtyStdin(): tty.ReadStream | undefined {
 export async function startRepl(agent: CodingAgent, options: StartReplOptions): Promise<void> {
   agent.loadMemoryContext().catch(() => {});
   agent.getHooks().run("session-start", { source: "startup" }).catch(() => []);
-  // Hide terminal cursor before Ink starts — we use █ as visual cursor
-  process.stderr.write("\x1B[?25l");
+  cursorManager.install();
   const ttyStdin = openTtyStdin();
   const instance = render(<App agent={agent} options={options} />, {
     ...(ttyStdin ? { stdin: ttyStdin } : {}),
   });
   await instance.waitUntilExit();
   ttyStdin?.destroy();
-  // Restore terminal cursor after Ink exits
-  process.stderr.write("\x1B[?25h");
+  cursorManager.uninstall();
   agent.getHooks().run("session-end", { source: "exit" }).catch(() => []);
 }

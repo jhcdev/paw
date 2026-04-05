@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { countLinesBelowInput, measureImeColumn } from "./ime-cursor.js";
 
 /**
  * Test the cursor-based input logic used in cli.tsx.
@@ -231,5 +232,270 @@ describe("input cursor — full workflow", () => {
     s = insertChar(s, "!");
     expect(s.input).toBe("안녕!하세요");
     expect(s.cursorPos).toBe(3);
+  });
+});
+
+describe("IME cursor positioning", () => {
+  it("measures ASCII text from the prompt start", () => {
+    expect(measureImeColumn("abc")).toBe(9);
+  });
+
+  it("counts wide characters as two columns", () => {
+    expect(measureImeColumn("안a")).toBe(9);
+  });
+
+  it("counts the default footer when nothing extra is shown", () => {
+    expect(countLinesBelowInput({ baseLinesBelowInput: 2 })).toBe(2);
+  });
+
+  it("includes the activity selector footer", () => {
+    expect(countLinesBelowInput({
+      baseLinesBelowInput: 2,
+      activitySelectorCount: 3,
+      isViewingActivitySelector: true,
+    })).toBe(6);
+  });
+
+  it("includes activity detail footer rows", () => {
+    expect(countLinesBelowInput({
+      baseLinesBelowInput: 2,
+      activityLogCount: 5,
+      isViewingActivityDetail: true,
+    })).toBe(10);
+  });
+});
+
+// ── Cursor class tests ────────────────────────────────────────────────────────
+
+import { Cursor, pushToKillRing, getLastKill, resetKillAccumulation } from "./cursor.js";
+
+describe("Cursor — basic left/right", () => {
+  it("moves right through ASCII", () => {
+    const c = Cursor.fromText("abc", 80, 0);
+    expect(c.right().offset).toBe(1);
+    expect(c.right().right().offset).toBe(2);
+  });
+
+  it("moves left through ASCII", () => {
+    const c = Cursor.fromText("abc", 80, 3);
+    expect(c.left().offset).toBe(2);
+    expect(c.left().left().offset).toBe(1);
+  });
+
+  it("does not go below 0", () => {
+    const c = Cursor.fromText("abc", 80, 0);
+    expect(c.left().offset).toBe(0);
+  });
+
+  it("does not go past end", () => {
+    const c = Cursor.fromText("abc", 80, 3);
+    expect(c.right().offset).toBe(3);
+  });
+
+  it("isAtStart / isAtEnd", () => {
+    const c = Cursor.fromText("hi", 80, 0);
+    expect(c.isAtStart()).toBe(true);
+    expect(c.isAtEnd()).toBe(false);
+    expect(c.right().right().isAtEnd()).toBe(true);
+  });
+});
+
+describe("Cursor — CJK and emoji grapheme navigation", () => {
+  it("moves through Korean characters one grapheme at a time", () => {
+    const c = Cursor.fromText("안녕", 80, 0);
+    const c1 = c.right();
+    // JS strings are UTF-16; Korean chars have string length 1
+    expect(c1.offset).toBe(1);
+    expect(c1.right().offset).toBe(2);
+  });
+
+  it("backspace on Korean removes one grapheme", () => {
+    const c = Cursor.fromText("안녕하", 80, 3);
+    const c2 = c.backspace();
+    expect(c2.text).toBe("안녕");
+    expect(c2.offset).toBe(2);
+  });
+
+  it("handles emoji as single grapheme", () => {
+    // 👋 is U+1F44B, represented as surrogate pair in JS (length 2)
+    const wave = "👋";
+    const c = Cursor.fromText(wave + "hi", 80, 0);
+    const c1 = c.right();
+    expect(c1.offset).toBe(wave.length); // 2 for surrogate pair
+    expect(c1.text.slice(0, c1.offset)).toBe(wave);
+  });
+});
+
+describe("Cursor — insert / backspace / del", () => {
+  it("inserts at beginning", () => {
+    const c = Cursor.fromText("bc", 80, 0).insert("a");
+    expect(c.text).toBe("abc");
+    expect(c.offset).toBe(1);
+  });
+
+  it("inserts in middle", () => {
+    const c = Cursor.fromText("ac", 80, 1).insert("b");
+    expect(c.text).toBe("abc");
+    expect(c.offset).toBe(2);
+  });
+
+  it("inserts at end", () => {
+    const c = Cursor.fromText("ab", 80, 2).insert("c");
+    expect(c.text).toBe("abc");
+    expect(c.offset).toBe(3);
+  });
+
+  it("del removes character after cursor", () => {
+    const c = Cursor.fromText("abc", 80, 1).del();
+    expect(c.text).toBe("ac");
+    expect(c.offset).toBe(1);
+  });
+
+  it("del at end does nothing", () => {
+    const c = Cursor.fromText("abc", 80, 3).del();
+    expect(c.text).toBe("abc");
+    expect(c.offset).toBe(3);
+  });
+
+  it("backspace at start does nothing", () => {
+    const c = Cursor.fromText("abc", 80, 0).backspace();
+    expect(c.text).toBe("abc");
+    expect(c.offset).toBe(0);
+  });
+});
+
+describe("Cursor — deleteToLineStart / deleteToLineEnd", () => {
+  it("deleteToLineEnd kills from cursor to end", () => {
+    const c = Cursor.fromText("hello world", 80, 5);
+    const { cursor: c2, killed } = c.deleteToLineEnd();
+    expect(c2.text).toBe("hello");
+    expect(c2.offset).toBe(5);
+    expect(killed).toBe(" world");
+  });
+
+  it("deleteToLineStart kills from start to cursor", () => {
+    const c = Cursor.fromText("hello world", 80, 5);
+    const { cursor: c2, killed } = c.deleteToLineStart();
+    expect(c2.text).toBe(" world");
+    expect(c2.offset).toBe(0);
+    expect(killed).toBe("hello");
+  });
+
+  it("deleteToLineEnd at end returns empty killed", () => {
+    const c = Cursor.fromText("hello", 80, 5);
+    const { killed } = c.deleteToLineEnd();
+    expect(killed).toBe("");
+  });
+
+  it("deleteToLineStart at start returns empty killed", () => {
+    const c = Cursor.fromText("hello", 80, 0);
+    const { killed } = c.deleteToLineStart();
+    expect(killed).toBe("");
+  });
+
+  it("works with multi-line text — only kills current line portion", () => {
+    const c = Cursor.fromText("foo\nbar\nbaz", 80, 6); // offset 6 = 'b' in 'bar'
+    const { cursor: c2, killed } = c.deleteToLineEnd();
+    expect(killed).toBe("r");
+    expect(c2.text).toBe("foo\nba\nbaz");
+  });
+});
+
+describe("Cursor — deleteWordBefore", () => {
+  it("deletes word before cursor", () => {
+    const c = Cursor.fromText("hello world", 80, 11);
+    const { cursor: c2, killed } = c.deleteWordBefore();
+    expect(killed).toBe("world");
+    expect(c2.text).toBe("hello ");
+  });
+
+  it("deletes word in middle", () => {
+    const c = Cursor.fromText("foo bar baz", 80, 7);
+    const { cursor: c2, killed } = c.deleteWordBefore();
+    expect(killed).toBe("bar");
+    expect(c2.text).toBe("foo  baz");
+  });
+
+  it("does nothing at start", () => {
+    const c = Cursor.fromText("hello", 80, 0);
+    const { killed } = c.deleteWordBefore();
+    expect(killed).toBe("");
+  });
+});
+
+describe("Cursor — startOfLine / endOfLine", () => {
+  it("moves to start of line", () => {
+    const c = Cursor.fromText("hello", 80, 3);
+    expect(c.startOfLine().offset).toBe(0);
+  });
+
+  it("moves to end of line", () => {
+    const c = Cursor.fromText("hello", 80, 2);
+    expect(c.endOfLine().offset).toBe(5);
+  });
+
+  it("works on second line of multi-line text", () => {
+    const c = Cursor.fromText("foo\nbar", 80, 5); // offset 5 = 'a' in 'bar'
+    expect(c.startOfLine().offset).toBe(4); // start of 'bar'
+    expect(c.endOfLine().offset).toBe(7); // end of 'bar'
+  });
+});
+
+describe("Cursor — render", () => {
+  it("renders cursor at position", () => {
+    const c = Cursor.fromText("hello", 80, 2);
+    expect(c.render("█")).toBe("he█llo");
+  });
+
+  it("renders at start", () => {
+    const c = Cursor.fromText("hello", 80, 0);
+    expect(c.render("█")).toBe("█hello");
+  });
+
+  it("renders at end", () => {
+    const c = Cursor.fromText("hello", 80, 5);
+    expect(c.render("█")).toBe("hello█");
+  });
+});
+
+describe("Cursor — word navigation", () => {
+  it("nextWord moves to end of next word", () => {
+    const c = Cursor.fromText("hello world", 80, 0);
+    expect(c.nextWord().offset).toBe(5);
+  });
+
+  it("prevWord moves to start of previous word", () => {
+    const c = Cursor.fromText("hello world", 80, 11);
+    expect(c.prevWord().offset).toBe(6);
+  });
+});
+
+describe("kill ring", () => {
+  it("stores and retrieves killed text", () => {
+    resetKillAccumulation();
+    pushToKillRing("hello", "append");
+    expect(getLastKill()).toBe("hello");
+  });
+
+  it("appends consecutive kills in append direction", () => {
+    resetKillAccumulation();
+    pushToKillRing("foo", "append");
+    pushToKillRing(" bar", "append");
+    expect(getLastKill()).toBe("foo bar");
+  });
+
+  it("prepends in prepend direction", () => {
+    resetKillAccumulation();
+    pushToKillRing("world", "prepend");
+    pushToKillRing("hello ", "prepend");
+    expect(getLastKill()).toBe("hello world");
+  });
+
+  it("resets accumulation breaks chain", () => {
+    resetKillAccumulation();
+    pushToKillRing("first", "append");
+    resetKillAccumulation();
+    pushToKillRing("second", "append");
+    expect(getLastKill()).toBe("second");
   });
 });

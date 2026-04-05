@@ -154,7 +154,7 @@ export class CodingAgent {
     return shouldCompact((this.provider as any).messages.length);
   }
 
-  async runTurn(prompt: string): Promise<AgentTurnResult> {
+  async runTurn(prompt: string, onChunk?: (chunk: string) => void): Promise<AgentTurnResult> {
     // Inject memory context on first turn of session
     if (!this.memoryInjected && this.memoryContext) {
       prompt = `[Context]\n${this.memoryContext}\n\n[User]\n${prompt}`;
@@ -166,7 +166,7 @@ export class CodingAgent {
     const actId = this.activityLog.start("agent", "thinking", prompt.slice(0, 50));
     this.activityLog.log(actId, "prompt", prompt);
     try {
-      const result = await this.provider.runTurn(prompt);
+      const result = await this.provider.runTurn(prompt, onChunk);
       this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
       this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
       this.tracker.record(this.currentProvider, this.currentModel, result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0);

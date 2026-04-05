@@ -14,8 +14,10 @@ export type AgentTurnResult = {
   usage?: TokenUsage;
 };
 
+export type OnChunkCallback = (chunk: string) => void;
+
 export interface LlmProvider {
-  runTurn(prompt: string): Promise<AgentTurnResult>;
+  runTurn(prompt: string, onChunk?: OnChunkCallback): Promise<AgentTurnResult>;
   clear(): void;
 }
 
