@@ -1108,17 +1108,27 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       // ── compact ──
-      if (line === "/compact") {
-        agent.clear();
-        const summary = entries
-          .filter((e) => e.role === "assistant")
-          .slice(-3)
-          .map((e) => e.text.slice(0, 200))
-          .join("\n---\n");
-        setEntries([
-          { role: "system", text: "Conversation compacted. Recent context preserved." },
-          ...(summary ? [{ role: "system" as const, text: `Summary of recent:\n${summary}` }] : []),
-        ]);
+      if (line === "/compact" || line.startsWith("/compact ")) {
+        const focus = line.startsWith("/compact ") ? line.slice(9).trim() : undefined;
+        setThinkMsg("Compacting conversation...");
+        busyRef.current = true;
+        setIsBusy(true);
+        try {
+          const result = await agent.compact(focus);
+          if (result) {
+            setEntries([
+              { role: "system", text: `Conversation compacted. ${result.droppedCount} messages summarized, recent messages preserved.` },
+              { role: "system", text: `Summary:\n${result.summary.slice(0, 500)}` },
+            ]);
+          } else {
+            setEntries((c) => [...c, { role: "system", text: "Nothing to compact." }]);
+          }
+        } catch {
+          setEntries((c) => [...c, { role: "system", text: "Compaction failed." }]);
+        } finally {
+          busyRef.current = false;
+          setIsBusy(false);
+        }
         return;
       }
 
@@ -1609,6 +1619,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const stopResult = await agent.runStopHook();
           if (stopResult.blocked && stopResult.reason) {
             setEntries(c => [...c, { role: "system", text: `Hook feedback: ${stopResult.reason}` }]);
+          }
+        }
+
+        // Auto-compact when conversation gets long
+        if (agent.shouldAutoCompact()) {
+          setThinkMsg("Auto-compacting...");
+          const compactResult = await agent.compact().catch(() => null);
+          if (compactResult) {
+            setEntries((c) => [...c, { role: "system", text: `Auto-compacted: ${compactResult.droppedCount} messages summarized.` }]);
           }
         }
       } catch (error) {

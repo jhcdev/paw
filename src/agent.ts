@@ -7,6 +7,7 @@ import { createProvider } from "./providers/index.js";
 import { HookManager } from "./hooks.js";
 import { Verifier } from "./verify.js";
 import { loadMemory } from "./memory.js";
+import { shouldCompact, buildCompactionPrompt, buildCompactedMessages, type CompactionMessage } from "./compaction.js";
 import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage } from "./types.js";
 import type { SafetyConfig } from "./safety.js";
 
@@ -99,6 +100,58 @@ export class CodingAgent {
     const { context } = await loadMemory(this.cwd);
     this.memoryContext = context;
     return context;
+  }
+
+  /** Compact conversation history using AI summarization */
+  async compact(focus?: string): Promise<{ summary: string; droppedCount: number } | null> {
+    // Get current messages from provider
+    if (!("messages" in this.provider) || !Array.isArray((this.provider as any).messages)) {
+      return null; // Provider doesn't support message access
+    }
+    const messages = (this.provider as any).messages as { role: string; content: unknown }[];
+
+    // Convert to CompactionMessage format
+    const compactionMsgs: CompactionMessage[] = messages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        text: typeof m.content === "string"
+          ? m.content
+          : Array.isArray(m.content)
+            ? m.content.map((c: any) => c.text ?? "").join("")
+            : String(m.content),
+      }));
+
+    const { prompt, toSummarize, toKeep } = buildCompactionPrompt(compactionMsgs, 8, focus);
+    if (!prompt || toSummarize.length === 0) return null;
+
+    // Use the provider itself to generate the summary
+    const result = await this.provider.runTurn(prompt);
+    const summary = result.text;
+
+    // Rebuild messages: clear and re-add
+    this.provider.clear();
+
+    // Re-inject memory context
+    const compacted = buildCompactedMessages(summary, toKeep, this.memoryContext);
+    for (const msg of compacted) {
+      if (msg.role === "user") {
+        (this.provider as any).messages.push({ role: "user", content: msg.text });
+      } else if (msg.role === "assistant") {
+        (this.provider as any).messages.push({ role: "assistant", content: [{ type: "text", text: msg.text }] });
+      }
+    }
+    this.memoryInjected = true; // Memory was re-injected via compacted messages
+
+    return { summary, droppedCount: toSummarize.length };
+  }
+
+  /** Check if auto-compaction should trigger */
+  shouldAutoCompact(): boolean {
+    if (!("messages" in this.provider) || !Array.isArray((this.provider as any).messages)) {
+      return false;
+    }
+    return shouldCompact((this.provider as any).messages.length);
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
