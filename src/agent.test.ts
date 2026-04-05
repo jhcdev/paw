@@ -301,5 +301,25 @@ describe("CodingAgent", () => {
       const recent = agent.activityLog.getRecent(10);
       expect(recent.length).toBeGreaterThanOrEqual(1);
     });
+
+    it("records tool calls and results from provider hooks", async () => {
+      let installedHooks: any;
+      mockProvider.setToolHooks = vi.fn((hooks: unknown) => {
+        installedHooks = hooks;
+      });
+      mockProvider.runTurn = vi.fn(async (_prompt: string, _onChunk?: unknown, onStatus?: (status: string) => void) => {
+        onStatus?.("tool: read_file");
+        await installedHooks.preTool("read_file", { path: "src/app.ts" });
+        await installedHooks.postTool("read_file", { path: "src/app.ts" }, { content: "const answer = 42;" });
+        return { text: "mock response", usage: { inputTokens: 100, outputTokens: 50 } };
+      });
+
+      const agent = createAgent();
+      await agent.runTurn("inspect app");
+
+      const activity = agent.activityLog.getRecent(1)[0];
+      expect(activity?.logs.some((log) => log.type === "tool-call" && log.content.includes("read_file"))).toBe(true);
+      expect(activity?.logs.some((log) => log.type === "tool-result" && log.content.includes("const answer = 42;"))).toBe(true);
+    });
   });
 });

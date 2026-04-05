@@ -8,7 +8,7 @@ import { HookManager } from "./hooks.js";
 import { Verifier } from "./verify.js";
 import { loadMemory } from "./memory.js";
 import { shouldCompact, buildCompactionPrompt, buildCompactedMessages, type CompactionMessage } from "./compaction.js";
-import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage } from "./types.js";
+import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage, UserPromptCallback } from "./types.js";
 import type { SafetyConfig } from "./safety.js";
 
 export class CodingAgent {
@@ -27,6 +27,8 @@ export class CodingAgent {
   private detectedProviders?: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[];
   private verifyEnabled = false;
   private safetyConfig: SafetyConfig = { enabled: true, autoCheckpoint: true, blockCritical: true };
+  private currentActivityId: string | null = null;
+  private userPromptFn: UserPromptCallback | null = null;
   readonly tracker = new UsageTracker();
   readonly activityLog = new ActivityLog();
   readonly verifier: Verifier;
@@ -164,9 +166,20 @@ export class CodingAgent {
     const hookContext = preResults.filter(r => r.additionalContext).map(r => r.additionalContext).join("\n");
     if (hookContext) prompt = hookContext + "\n\n" + prompt;
     const actId = this.activityLog.start("agent", "thinking", prompt.slice(0, 50));
+    this.currentActivityId = actId;
     this.activityLog.log(actId, "prompt", prompt);
+    const seenStatuses = new Set<string>();
     try {
-      const result = await this.provider.runTurn(prompt, onChunk, onStatus);
+      const result = await this.provider.runTurn(
+        prompt,
+        onChunk,
+        (status) => {
+          if (onStatus) onStatus(status);
+          if (!status || status.startsWith("tool:") || seenStatuses.has(status)) return;
+          seenStatuses.add(status);
+          this.logCurrentActivity("info", status);
+        },
+      );
       this.totalUsage.inputTokens += result.usage?.inputTokens ?? 0;
       this.totalUsage.outputTokens += result.usage?.outputTokens ?? 0;
       this.tracker.record(this.currentProvider, this.currentModel, result.usage?.inputTokens ?? 0, result.usage?.outputTokens ?? 0);
@@ -227,6 +240,8 @@ export class CodingAgent {
         }
       }
       throw err;
+    } finally {
+      this.currentActivityId = null;
     }
   }
 
@@ -290,6 +305,14 @@ export class CodingAgent {
     return { ...this.safetyConfig };
   }
 
+  setUserPrompt(fn: UserPromptCallback): void {
+    this.userPromptFn = fn;
+  }
+
+  getUserPrompt(): UserPromptCallback | null {
+    return this.userPromptFn;
+  }
+
   /** Switch the active provider and model. Returns true if successful. */
   switchProvider(provider: ProviderName, model?: string): { ok: boolean; error?: string } {
     const registered = this.multi.getRegistered();
@@ -329,22 +352,73 @@ export class CodingAgent {
     if ("setToolHooks" in this.provider && typeof (this.provider as any).setToolHooks === "function") {
       (this.provider as any).setToolHooks({
         preTool: async (toolName: string, input: Record<string, unknown>) => {
+          this.logCurrentActivity("tool-call", this.formatToolCall(toolName, input));
           const results = await this.hooks.run("pre-tool", { tool_name: toolName, tool_input: input }, toolName).catch(() => []);
-          const blocked = results.some(r => r.blocked);
+          let blocked = results.some(r => r.blocked);
           const reason = results.find(r => r.blocked)?.stderr || "Blocked by hook";
           const additionalContext = results.filter(r => r.additionalContext).map(r => r.additionalContext).join("\n") || undefined;
+          if (blocked && this.userPromptFn) {
+            const result = await this.userPromptFn({
+              title: "🔒 Hook blocked operation",
+              message: reason,
+              detail: this.formatToolCall(toolName, input),
+              choices: [
+                { label: "Allow (override hook)", value: "allow" },
+                { label: "Deny (keep blocked)", value: "deny" },
+                { label: "Custom response...", value: "__custom__" },
+              ],
+              allowCustom: true,
+            });
+            if (result.value === "allow") {
+              blocked = false;
+            } else if (result.value === "__custom__" && result.customText) {
+              return { blocked: true, reason: `[USER RESPONSE] ${result.customText}`, additionalContext };
+            }
+          }
+          if (blocked) this.logCurrentActivity("error", `${toolName}: ${reason}`);
           return { blocked, reason, additionalContext };
         },
         postTool: async (toolName: string, input: Record<string, unknown>, result: { content: string; isError?: boolean }) => {
+          this.logCurrentActivity(
+            result.isError ? "error" : "tool-result",
+            this.formatToolResult(toolName, input, result.content),
+          );
           const results = await this.hooks.run("post-tool", { tool_name: toolName, tool_input: input, tool_result: result }, toolName).catch(() => []);
           const additionalContext = results.filter(r => r.additionalContext).map(r => r.additionalContext).join("\n") || undefined;
           return { additionalContext };
         },
         postToolFailure: async (toolName: string, input: Record<string, unknown>, error: string) => {
+          this.logCurrentActivity("error", this.formatToolResult(toolName, input, error));
           await this.hooks.run("post-tool-failure", { tool_name: toolName, tool_input: input, error }, toolName).catch(() => []);
         },
       });
     }
+  }
+
+  private logCurrentActivity(type: "tool-call" | "tool-result" | "info" | "error", content: string): void {
+    if (!this.currentActivityId) return;
+    this.activityLog.log(this.currentActivityId, type, content);
+  }
+
+  private formatToolCall(toolName: string, input: Record<string, unknown>): string {
+    return `${toolName} ${this.stringifyForLog(input)}`.trim();
+  }
+
+  private formatToolResult(toolName: string, input: Record<string, unknown>, content: string): string {
+    return `${toolName} ${this.stringifyForLog(input)} => ${this.clipLogContent(content)}`.trim();
+  }
+
+  private stringifyForLog(value: unknown): string {
+    try {
+      return this.clipLogContent(JSON.stringify(value));
+    } catch {
+      return "[unserializable]";
+    }
+  }
+
+  private clipLogContent(text: string, limit = 2000): string {
+    if (text.length <= limit) return text;
+    return text.slice(0, Math.max(0, limit - 1)).trimEnd() + "…";
   }
 
   async runStopHook(): Promise<{ blocked: boolean; reason?: string }> {

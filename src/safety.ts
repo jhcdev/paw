@@ -17,6 +17,7 @@ export type SafetyConfig = {
   enabled: boolean;
   autoCheckpoint: boolean;
   blockCritical: boolean;
+  onPrompt?: import("./types.js").UserPromptCallback;
 };
 
 // LOW risk patterns — read-only tools

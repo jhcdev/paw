@@ -1,9 +1,16 @@
 import OpenAI from "openai";
 import type { ChatCompletionMessageParam, ChatCompletionTool } from "openai/resources/chat/completions";
-import { toolDefinitions, toolHandlers } from "../tools.js";
+import { toolDefinitions, toolHandlers, createSafeHandlers } from "../tools.js";
 import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler, TokenUsage } from "../types.js";
+import type { SafetyConfig } from "../safety.js";
 
 const SYSTEM_PROMPT = `You are Paw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
+
+type ToolHookCallback = {
+  preTool?: (toolName: string, input: Record<string, unknown>) => Promise<{ blocked: boolean; reason?: string; additionalContext?: string }>;
+  postTool?: (toolName: string, input: Record<string, unknown>, result: { content: string; isError?: boolean }) => Promise<{ additionalContext?: string }>;
+  postToolFailure?: (toolName: string, input: Record<string, unknown>, error: string) => Promise<void>;
+};
 
 function toOpenAITools(extra: ToolDefinition[] = []): ChatCompletionTool[] {
   return [...toolDefinitions, ...extra].map((t) => ({
@@ -23,6 +30,8 @@ export class OpenAIProvider implements LlmProvider {
   private readonly messages: ChatCompletionMessageParam[] = [];
   private extraTools: ToolDefinition[] = [];
   private extraHandlers: Record<string, ToolHandler> = {};
+  private safetyConfig: SafetyConfig = { enabled: true, autoCheckpoint: true, blockCritical: true };
+  private toolHooks: ToolHookCallback = {};
 
   constructor(args: { apiKey: string; model: string; cwd: string; baseUrl?: string }) {
     this.client = new OpenAI({ apiKey: args.apiKey, ...(args.baseUrl ? { baseURL: args.baseUrl } : {}) });
@@ -36,6 +45,14 @@ export class OpenAIProvider implements LlmProvider {
     Object.assign(this.extraHandlers, handlers);
   }
 
+  setSafetyConfig(config: SafetyConfig): void {
+    this.safetyConfig = config;
+  }
+
+  setToolHooks(hooks: ToolHookCallback): void {
+    this.toolHooks = hooks;
+  }
+
   clear(): void {
     this.messages.length = 0;
     this.messages.push({ role: "system", content: SYSTEM_PROMPT });
@@ -44,7 +61,8 @@ export class OpenAIProvider implements LlmProvider {
   async runTurn(prompt: string, onChunk?: (chunk: string) => void, onStatus?: (status: string) => void): Promise<AgentTurnResult> {
     this.messages.push({ role: "user", content: prompt });
     let assistantText = "";
-    const allHandlers = { ...toolHandlers, ...this.extraHandlers };
+    const baseHandlers = { ...toolHandlers, ...this.extraHandlers };
+    const allHandlers = createSafeHandlers(this.cwd, this.safetyConfig, baseHandlers);
     const totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
 
     for (let i = 0; i < 10; i++) {
@@ -104,10 +122,24 @@ export class OpenAIProvider implements LlmProvider {
           }
           try {
             const args = JSON.parse(toolCall.arguments) as Record<string, unknown>;
+            if (this.toolHooks?.preTool) {
+              const hookResult = await this.toolHooks.preTool(toolCall.name, args);
+              if (hookResult.blocked) {
+                this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: hookResult.reason ?? "Blocked by hook" });
+                continue;
+              }
+            }
             const result = await handler(args, this.cwd);
             this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: result.content });
+            if (this.toolHooks?.postTool) {
+              await this.toolHooks.postTool(toolCall.name, args, result);
+            }
           } catch (error) {
-            this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: error instanceof Error ? error.message : String(error) });
+            const errMsg = error instanceof Error ? error.message : String(error);
+            this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: errMsg });
+            if (this.toolHooks?.postToolFailure) {
+              await this.toolHooks.postToolFailure(toolCall.name, JSON.parse(toolCall.arguments) as Record<string, unknown>, errMsg);
+            }
           }
         }
         continue;
@@ -146,10 +178,28 @@ export class OpenAIProvider implements LlmProvider {
         }
         try {
           const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
+          if (this.toolHooks?.preTool) {
+            const hookResult = await this.toolHooks.preTool(toolCall.function.name, args);
+            if (hookResult.blocked) {
+              this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: hookResult.reason ?? "Blocked by hook" });
+              continue;
+            }
+          }
           const result = await handler(args, this.cwd);
           this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: result.content });
+          if (this.toolHooks?.postTool) {
+            await this.toolHooks.postTool(toolCall.function.name, args, result);
+          }
         } catch (error) {
-          this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: error instanceof Error ? error.message : String(error) });
+          const errMsg = error instanceof Error ? error.message : String(error);
+          this.messages.push({ role: "tool", tool_call_id: toolCall.id, content: errMsg });
+          if (this.toolHooks?.postToolFailure) {
+            await this.toolHooks.postToolFailure(
+              toolCall.function.name,
+              JSON.parse(toolCall.function.arguments) as Record<string, unknown>,
+              errMsg,
+            );
+          }
         }
       }
     }

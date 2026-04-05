@@ -42,3 +42,27 @@ export type ToolResult = {
 };
 
 export type ToolHandler = (input: Record<string, unknown>, cwd: string) => Promise<ToolResult>;
+
+/** Generic interactive prompt shown to user during agent execution */
+export type UserPromptChoice = {
+  label: string;
+  value: string;
+};
+
+export type UserPrompt = {
+  title: string;
+  message: string;
+  detail?: string;
+  choices: UserPromptChoice[];
+  /** If true, the last choice opens a free-text input */
+  allowCustom?: boolean;
+};
+
+export type UserPromptResult = {
+  /** The value of the selected choice, or "__custom__" for free-text */
+  value: string;
+  /** Custom text if user chose free-text input */
+  customText?: string;
+};
+
+export type UserPromptCallback = (prompt: UserPrompt) => Promise<UserPromptResult>;

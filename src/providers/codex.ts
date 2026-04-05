@@ -93,13 +93,7 @@ export class CodexProvider implements LlmProvider {
         }
       });
 
-      const timeout = setTimeout(() => {
-        child.kill("SIGTERM");
-        resolve({ text: "[Codex] Timeout after 5 minutes." });
-      }, 300000);
-
       child.on("close", (code) => {
-        clearTimeout(timeout);
         const output = extractCodexResponse(stdout) || stderr.trim() || "(no output)";
         this.history.push({ role: "assistant", text: output });
         if (code !== 0 && !output) {
@@ -110,7 +104,6 @@ export class CodexProvider implements LlmProvider {
       });
 
       child.on("error", (err) => {
-        clearTimeout(timeout);
         resolve({ text: `[Codex Error] ${err.message}` });
       });
     });

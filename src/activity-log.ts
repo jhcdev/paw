@@ -20,6 +20,59 @@ export type Activity = {
 
 let nextId = 0;
 
+const HISTORY_LOG_LIMIT = 8;
+const HISTORY_LINE_LIMIT = 240;
+
+function truncateLine(text: string, limit = HISTORY_LINE_LIMIT): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= limit) return normalized;
+  return normalized.slice(0, Math.max(0, limit - 1)).trimEnd() + "…";
+}
+
+function formatLogPrefix(type: LogEntry["type"]): string {
+  switch (type) {
+    case "tool-call":
+      return "call";
+    case "tool-result":
+      return "result";
+    case "error":
+      return "error";
+    case "info":
+      return "info";
+    case "prompt":
+      return "prompt";
+    case "response":
+      return "response";
+  }
+}
+
+export function formatActivityForHistory(activity: Activity): string | null {
+  const interestingLogs = activity.logs.filter((log) => log.type !== "prompt" && log.type !== "response");
+  const elapsedMs = (activity.finishedAt ?? Date.now()) - activity.startedAt;
+  const elapsed = `${(elapsedMs / 1000).toFixed(1)}s`;
+  const icon = activity.status === "done" ? "✓" : activity.status === "error" ? "✗" : "◉";
+  const lines = [`${icon} ${activity.name} (${elapsed})`];
+
+  const summaryOnly =
+    activity.status === "error" ||
+    activity.name !== "thinking" ||
+    activity.type !== "agent";
+
+  if (activity.detail && summaryOnly) {
+    lines.push(truncateLine(activity.detail));
+  }
+
+  if (interestingLogs.length === 0) {
+    return summaryOnly ? lines.join("\n") : null;
+  }
+
+  for (const log of interestingLogs.slice(-HISTORY_LOG_LIMIT)) {
+    lines.push(`${formatLogPrefix(log.type)}: ${truncateLine(log.content)}`);
+  }
+
+  return lines.join("\n");
+}
+
 export class ActivityLog {
   private activities: Activity[] = [];
   private onChange: (() => void) | null = null;
@@ -78,6 +131,10 @@ export class ActivityLog {
 
   getRecent(limit = 10): Activity[] {
     return this.activities.slice(-limit);
+  }
+
+  getAll(): Activity[] {
+    return [...this.activities];
   }
 
   getRunning(): Activity[] {

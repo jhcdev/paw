@@ -10,8 +10,9 @@ import { Box, Newline, render, Text, useApp, useInput } from "ink";
 
 import type { CodingAgent } from "./agent.js";
 import { appendToSession, saveSession, listSessions, watchSession, type SessionData, type SessionEntry } from "./session.js";
+import { formatActivityForHistory } from "./activity-log.js";
 import { toolDefinitions } from "./tools.js";
-import type { ProviderName } from "./types.js";
+import type { ProviderName, UserPrompt, UserPromptResult } from "./types.js";
 import { formatModelList, getAllFilteredModels, resolveModelByIndex, detectPlan } from "./model-catalog.js";
 import { routeMessage } from "./smart-router.js";
 import { loadSkills, formatSkillList, renderSkill } from "./skills.js";
@@ -180,6 +181,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [verifyCursor, setVerifyCursor] = useState(0);
   const [skillsCache, setSkillsCache] = useState<import("./skills.js").Skill[]>([]);
   const spawnResultsRef = React.useRef<string[]>([]);
+  const persistedActivityIdsRef = React.useRef(new Set<string>());
+
+  // Interactive prompt state (safety, hooks, agent questions)
+  const [activePrompt, setActivePrompt] = useState<UserPrompt | null>(null);
+  const [promptCursor, setPromptCursor] = useState(0);
+  const [promptCustomInput, setPromptCustomInput] = useState("");
+  const [promptCustomMode, setPromptCustomMode] = useState(false);
+  const promptResolveRef = React.useRef<((result: UserPromptResult) => void) | null>(null);
   const [spawnManager] = useState(() => {
     const mgr = new SpawnManager(options.cwd, (task) => {
       if (task.status === "done" || task.status === "failed") {
@@ -230,6 +239,41 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     agent.activityLog.setOnChange(() => setActivityVersion((v) => v + 1));
   }, [agent]);
 
+  // Wire up interactive prompt callback (safety, hooks, etc.)
+  const showPrompt = React.useCallback((prompt: UserPrompt): Promise<UserPromptResult> => {
+    return new Promise<UserPromptResult>((resolve) => {
+      promptResolveRef.current = resolve;
+      setActivePrompt(prompt);
+      setPromptCursor(0);
+      setPromptCustomMode(false);
+      setPromptCustomInput("");
+    });
+  }, []);
+
+  React.useEffect(() => {
+    agent.setSafetyConfig({ onPrompt: showPrompt });
+    agent.setUserPrompt(showPrompt);
+  }, [agent, showPrompt]);
+
+  React.useEffect(() => {
+    const freshEntries = agent.activityLog
+      .getAll()
+      .filter((act) => (act.status === "done" || act.status === "error") && !persistedActivityIdsRef.current.has(act.id))
+      .map((act) => ({ id: act.id, text: formatActivityForHistory(act) }))
+      .filter((item): item is { id: string; text: string } => Boolean(item.text));
+
+    if (freshEntries.length === 0) return;
+
+    for (const item of freshEntries) {
+      persistedActivityIdsRef.current.add(item.id);
+    }
+
+    setEntries((current) => [
+      ...current,
+      ...freshEntries.map((item) => ({ role: "system" as const, text: item.text })),
+    ]);
+  }, [agent, activityVersion]);
+
   // Save session after 1s of no changes (debounced to avoid I/O on every keystroke)
   React.useEffect(() => {
     if (entries.length <= 1) return;
@@ -266,6 +310,65 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   }, [input, skillsCache]);
 
   useInput((ch, key) => {
+    // ── Interactive prompt panel ──
+    if (activePrompt) {
+      const choices = activePrompt.choices;
+      if (promptCustomMode) {
+        if (key.escape) { setPromptCustomMode(false); return; }
+        if (key.return) {
+          promptResolveRef.current?.({ value: "__custom__", customText: promptCustomInput });
+          promptResolveRef.current = null;
+          setEntries((c) => [...c, { role: "system", text: `→ "${promptCustomInput}"` }]);
+          setActivePrompt(null);
+          setPromptCustomInput("");
+          setPromptCustomMode(false);
+          return;
+        }
+        if (key.backspace || key.delete) { setPromptCustomInput((s) => s.slice(0, -1)); return; }
+        if (ch && !key.ctrl && !key.meta) { setPromptCustomInput((s) => s + ch); return; }
+        return;
+      }
+      if (key.escape) {
+        // Escape = pick the second choice (deny) or first if only one
+        const denyIdx = choices.length > 1 ? 1 : 0;
+        promptResolveRef.current?.({ value: choices[denyIdx].value });
+        promptResolveRef.current = null;
+        setEntries((c) => [...c, { role: "system", text: `→ ${choices[denyIdx].label}` }]);
+        setActivePrompt(null);
+        return;
+      }
+      if (key.upArrow) { setPromptCursor((i) => Math.max(i - 1, 0)); return; }
+      if (key.downArrow) { setPromptCursor((i) => Math.min(i + 1, choices.length - 1)); return; }
+      // Number key shortcuts (1-9)
+      if (ch >= "1" && ch <= "9") {
+        const idx = Number(ch) - 1;
+        if (idx < choices.length) {
+          if (activePrompt.allowCustom && idx === choices.length - 1) {
+            setPromptCustomMode(true);
+            return;
+          }
+          promptResolveRef.current?.({ value: choices[idx].value });
+          promptResolveRef.current = null;
+          setEntries((c) => [...c, { role: "system", text: `→ ${choices[idx].label}` }]);
+          setActivePrompt(null);
+          return;
+        }
+      }
+      if (key.return) {
+        const selected = choices[promptCursor];
+        if (activePrompt.allowCustom && promptCursor === choices.length - 1) {
+          setPromptCustomMode(true);
+          return;
+        }
+        promptResolveRef.current?.({ value: selected.value });
+        promptResolveRef.current = null;
+        setEntries((c) => [...c, { role: "system", text: `→ ${selected.label}` }]);
+        setActivePrompt(null);
+        return;
+      }
+      return;
+    }
+
     if (key.ctrl && ch === "c") {
       if (isBusy) {
         cancelRef.current = true;
@@ -2373,6 +2476,29 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         </Text>
       </Box>
 
+      {/* Interactive prompt panel */}
+      {activePrompt ? (
+        <Box flexDirection="column" borderStyle="round" borderColor="#cc6633" paddingX={2} paddingY={1}>
+          <Text color="#ff6633" bold>{activePrompt.title}</Text>
+          <Text color="gray">{activePrompt.message}</Text>
+          {activePrompt.detail ? <Text color="#ffaa66" wrap="truncate-end">  {activePrompt.detail.slice(0, 120)}</Text> : null}
+          <Box flexDirection="column" marginTop={1}>
+            {activePrompt.choices.map((choice, i) => (
+              <Text key={i} color={i === promptCursor ? "#ff9c73" : "gray"} bold={i === promptCursor}>
+                {i === promptCursor ? " > " : "   "}{i + 1}. {choice.label}
+              </Text>
+            ))}
+          </Box>
+          {promptCustomMode ? (
+            <Box marginTop={1}>
+              <Text color="#ffaa66">{"  > "}</Text>
+              <Text color="white">{promptCustomInput}<Text color="#ff9c73">▌</Text></Text>
+            </Box>
+          ) : null}
+          <Text color="gray" italic>  ↑↓/1-{activePrompt.choices.length} select  Enter confirm  Esc cancel</Text>
+        </Box>
+      ) : null}
+
       {/* Activity Log — below input */}
       {activityView && activityView !== "__select__" ? (() => {
         const act = agent.activityLog.getById(activityView);
@@ -2417,17 +2543,35 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         </Box>
       ) : null}
 
-      {!activityView && turnCount > 0 && agent.activityLog.getRunning().length > 0 ? (
-        <Box flexDirection="column" paddingX={2}>
-          {agent.activityLog.getRunning().map((act) => (
-            <Box key={act.id} flexDirection="row">
-              <Text color="yellow">{"  ◉ "}</Text>
-              <Text color="gray">{act.name}...</Text>
-            </Box>
-          ))}
-          <Text color="gray" italic>  ↓ to inspect</Text>
-        </Box>
-      ) : null}
+      {!activityView && turnCount > 0 ? (() => {
+        const running = agent.activityLog.getRunning();
+        const recent = agent.activityLog.getAll()
+          .filter((a) => a.status !== "running")
+          .slice(-5);
+        if (running.length === 0 && recent.length === 0) return null;
+        return (
+          <Box flexDirection="column" paddingX={2}>
+            {recent.map((act) => {
+              const elapsed = `${(((act.finishedAt ?? Date.now()) - act.startedAt) / 1000).toFixed(1)}s`;
+              const icon = act.status === "done" ? "✓" : "✗";
+              const color = act.status === "done" ? "#668866" : "#886666";
+              return (
+                <Box key={act.id} flexDirection="row">
+                  <Text color={color}>{`  ${icon} `}</Text>
+                  <Text color={color} dimColor>{act.name} ({elapsed}){act.detail ? ` — ${act.detail.slice(0, 60)}` : ""}</Text>
+                </Box>
+              );
+            })}
+            {running.map((act) => (
+              <Box key={act.id} flexDirection="row">
+                <Text color="yellow">{"  ◉ "}</Text>
+                <Text color="gray">{act.name}...</Text>
+              </Box>
+            ))}
+            {(running.length > 0 || recent.length > 0) ? <Text color="gray" italic>  ↓ to inspect</Text> : null}
+          </Box>
+        );
+      })() : null}
     </Box>
   );
 }

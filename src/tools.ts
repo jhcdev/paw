@@ -334,7 +334,36 @@ export function createSafeHandlers(
         if (config.autoCheckpoint) {
           await createCheckpoint(handlerCwd || cwd).catch(() => {/* best-effort */});
         }
-        // Block with informative message so the AI can inform the user
+
+        if (config.onPrompt) {
+          const command = typeof input.command === "string" ? input.command : undefined;
+          const result = await config.onPrompt({
+            title: "⚠ High-risk operation detected",
+            message: check.reason,
+            detail: command,
+            choices: [
+              { label: "Allow (run this command)", value: "allow" },
+              { label: "Deny (cancel)", value: "deny" },
+              { label: "Disable safety checks", value: "disable_safety" },
+              { label: "Custom response...", value: "__custom__" },
+            ],
+            allowCustom: true,
+          });
+          if (result.value === "allow") {
+            return handler(input, handlerCwd);
+          }
+          if (result.value === "disable_safety") {
+            config.enabled = false;
+            return handler(input, handlerCwd);
+          }
+          if (result.value === "__custom__" && result.customText) {
+            return { content: `[USER RESPONSE] ${result.customText}`, isError: true };
+          }
+          // deny
+          return { content: `[DENIED] User declined this high-risk operation.\nReason: ${check.reason}`, isError: true };
+        }
+
+        // Fallback: block with informative message
         return {
           content: `[SAFETY BLOCK] This operation requires explicit user confirmation because it is high-risk.\nReason: ${check.reason}\nInform the user what this command will do and ask them to confirm by re-issuing the request or disabling safety with /safety off.`,
           isError: true,
