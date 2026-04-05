@@ -7,6 +7,7 @@ export class CodexProvider implements LlmProvider {
   private model: string;
   private readonly cwd: string;
   private effort: CodexEffort;
+  private history: { role: "user" | "assistant"; text: string }[] = [];
 
   constructor(args: { model: string; cwd: string; effort?: CodexEffort }) {
     this.model = args.model;
@@ -27,17 +28,42 @@ export class CodexProvider implements LlmProvider {
   }
 
   clear(): void {
-    // Codex exec is stateless per call
+    this.history = [];
+  }
+
+  /** @internal exposed for testing */
+  getHistory(): { role: "user" | "assistant"; text: string }[] {
+    return this.history;
+  }
+
+  /** @internal exposed for testing */
+  pushHistory(role: "user" | "assistant", text: string): void {
+    this.history.push({ role, text });
+  }
+
+  /** @internal exposed for testing */
+  buildPromptWithHistory(prompt: string): string {
+    if (this.history.length === 0) return prompt;
+
+    // Include last 10 turns as context (keep prompt size reasonable)
+    const recent = this.history.slice(-10);
+    const contextLines = recent.map((h) =>
+      h.role === "user" ? `> ${h.text.slice(0, 300)}` : `AI: ${h.text.slice(0, 300)}`
+    );
+    return `[Previous conversation]\n${contextLines.join("\n")}\n\n[Current message]\n${prompt}`;
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
+    const fullPrompt = this.buildPromptWithHistory(prompt);
+    this.history.push({ role: "user", text: prompt });
+
     return new Promise((resolve) => {
       const args = [
         "exec",
         "--dangerously-bypass-approvals-and-sandbox",
         "-c", `model="${this.model}"`,
         "-c", `effort="${this.effort}"`,
-        prompt,
+        fullPrompt,
       ];
 
       const child = spawn("codex", args, {
@@ -60,6 +86,7 @@ export class CodexProvider implements LlmProvider {
       child.on("close", (code) => {
         clearTimeout(timeout);
         const output = extractCodexResponse(stdout) || stderr.trim() || "(no output)";
+        this.history.push({ role: "assistant", text: output });
         if (code !== 0 && !output) {
           resolve({ text: `[Codex Error] Exit code ${code}` });
         } else {
