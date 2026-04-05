@@ -129,6 +129,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     return [{ role: "system", text: "Meow~ Ready to code! Try /help, /tools, /clear, or /exit." }];
   });
   const [input, setInput] = useState("");
+  const [cursorPos, setCursorPos] = useState(0);
   const [isBusy, setIsBusy] = useState(false);
   const busyRef = React.useRef(false);
   const pendingRef = React.useRef<string[]>([]);
@@ -746,30 +747,48 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (!value.trim()) return;
       inputRef.current = "";
       setInput("");
+      setCursorPos(0);
       submit(value);
       return;
     }
 
-    // Backspace
+    // Left/Right arrow — move cursor within input
+    if (key.leftArrow && !key.ctrl && !key.meta) {
+      setCursorPos((pos) => Math.max(0, pos - 1));
+      return;
+    }
+    if (key.rightArrow && !key.ctrl && !key.meta) {
+      setCursorPos((pos) => Math.min([...input].length, pos + 1));
+      return;
+    }
+
+    // Backspace — delete character before cursor
     if (key.backspace || key.delete) {
       setInput((prev) => {
         const chars = [...prev];
-        chars.pop();
+        const pos = Math.min(chars.length, cursorPos);
+        if (pos <= 0) return prev;
+        chars.splice(pos - 1, 1);
         const val = chars.join("");
         inputRef.current = val;
         return val;
       });
+      setCursorPos((pos) => Math.max(0, pos - 1));
       return;
     }
 
-    // Regular character input (including Korean/CJK)
+    // Regular character input (including Korean/CJK) — insert at cursor
     if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
       setInput((prev) => {
-        const next = prev + ch;
+        const chars = [...prev];
+        const pos = Math.min(chars.length, cursorPos);
+        chars.splice(pos, 0, ch);
+        const next = chars.join("");
         inputRef.current = next;
         if (next.startsWith("/")) setSelectedIdx(0);
         return next;
       });
+      setCursorPos((pos) => pos + 1);
     }
   });
 
@@ -2213,7 +2232,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       <Box borderStyle="round" borderColor="#d97757" paddingX={1}>
         <Text color="#ff9c73" bold>{" > "}</Text>
-        <Text>{input}</Text><Text color="#ff9c73">█</Text></Box>
+        <Text>{[...input].slice(0, cursorPos).join("")}</Text><Text color="#ff9c73">█</Text><Text>{[...input].slice(cursorPos).join("")}</Text></Box>
       <Text color="gray" italic> Esc to quit | /help for commands</Text>
       <Box marginTop={0} paddingX={1} justifyContent="space-between">
         <Text color={mode === "team" ? "#ff9c73" : "gray"}>{mode === "team" ? "TEAM" : providerLabel}/{agent.getActiveModel()}</Text>
