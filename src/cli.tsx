@@ -17,6 +17,7 @@ import { routeMessage } from "./smart-router.js";
 import { loadSkills, formatSkillList, renderSkill } from "./skills.js";
 import { AutoAgent } from "./auto-agent.js";
 import { PipeAgent } from "./pipe-agent.js";
+import { SpawnManager } from "./spawn-agent.js";
 
 const execAsync = promisify(exec);
 
@@ -88,6 +89,8 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/exit", desc: "quit" },
   { name: "/auto", desc: "autonomous agent mode" },
   { name: "/pipe", desc: "feed shell output to AI" },
+  { name: "/spawn", desc: "spawn a parallel sub-agent" },
+  { name: "/tasks", desc: "list spawned agent tasks" },
   { name: "/verify", desc: "toggle auto-verify or set provider (/verify ollama)" },
   { name: "/safety", desc: "configure safety guards" },
 ];
@@ -140,6 +143,22 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [verifyPanelModels, setVerifyPanelModels] = useState<{ id: string; name: string }[]>([]);
   const [verifyCursor, setVerifyCursor] = useState(0);
   const [skillsCache, setSkillsCache] = useState<import("./skills.js").Skill[]>([]);
+  const [spawnManager] = useState(() => {
+    const mgr = new SpawnManager(options.cwd, (task) => {
+      if (task.status === "done" || task.status === "failed") {
+        const icon = task.status === "done" ? "✓" : "✗";
+        setEntries((c) => [
+          ...c,
+          {
+            role: "system",
+            text: `${icon} Agent #${task.id} ${task.status}: ${task.goal.slice(0, 60)}${task.result ? "\n" + task.result.split("\n").slice(0, 3).join("\n") : ""}${task.error ? "\nError: " + task.error : ""}`,
+          },
+        ]);
+      }
+    });
+    return mgr;
+  });
+  const [spawnConfigured, setSpawnConfigured] = useState(false);
 
   // Pre-load skills for autocomplete
   React.useEffect(() => {
@@ -765,6 +784,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /auto <task> - autonomous agent (plan→execute→verify→fix loop)",
             "  /pipe <cmd>  - run command, AI analyzes output",
             "  /pipe fix <cmd> - run, fix errors, repeat until pass",
+            "  /spawn <task> - spawn parallel sub-agent",
+            "  /tasks       - list spawned tasks (/tasks results, /tasks clear)",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -1166,6 +1187,57 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setEntries((c) => [...c, { role: "system", text: `Auto failed: ${error instanceof Error ? error.message : String(error)}` }]);
         } finally {
           setIsBusy(false);
+        }
+        return;
+      }
+
+      // ── spawn ──
+      if (line.startsWith("/spawn ")) {
+        const goal = line.slice(7).trim();
+        if (!goal) {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /spawn <task description>" }]);
+          return;
+        }
+
+        // Register provider configs lazily on first spawn
+        if (!spawnConfigured) {
+          const registered = agent.getMulti().getRegistered();
+          for (const reg of registered) {
+            const config = agent.getMulti().getProviderConfig(reg.name);
+            if (config) {
+              spawnManager.addConfig({
+                provider: reg.name,
+                apiKey: config.apiKey,
+                model: config.model ?? reg.model,
+                cwd: options.cwd,
+                baseUrl: config.baseUrl,
+              });
+            }
+          }
+          setSpawnConfigured(true);
+        }
+
+        const id = spawnManager.spawn(goal);
+        const task = spawnManager.getTask(id);
+        setEntries((c) => [
+          ...c,
+          { role: "user", text: line },
+          { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${goal}` },
+        ]);
+        return;
+      }
+
+      // ── tasks ──
+      if (line === "/tasks" || line.startsWith("/tasks ")) {
+        const arg = line.slice(6).trim();
+
+        if (arg === "results" || arg === "result") {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatResults() }]);
+        } else if (arg === "clear") {
+          const cleared = spawnManager.clearCompleted();
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Cleared ${cleared} completed task(s).` }]);
+        } else {
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatStatus() }]);
         }
         return;
       }
