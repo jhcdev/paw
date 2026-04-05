@@ -18,6 +18,7 @@ import { loadSkills, formatSkillList, renderSkill } from "./skills.js";
 import { AutoAgent } from "./auto-agent.js";
 import { PipeAgent } from "./pipe-agent.js";
 import { SpawnManager } from "./spawn-agent.js";
+import { loadMemory, appendMemory, formatMemoryInfo } from "./memory.js";
 
 const execAsync = promisify(exec);
 
@@ -85,6 +86,7 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/session", desc: "current session ID" },
   { name: "/skills", desc: "list available skills" },
   { name: "/hooks", desc: "list configured hooks" },
+  { name: "/memory", desc: "show loaded memory & instructions" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
   { name: "/auto", desc: "autonomous agent mode" },
@@ -1241,6 +1243,21 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
 
+      // ── memory ──
+      if (line === "/memory") {
+        const { sources } = await loadMemory(options.cwd);
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: formatMemoryInfo(sources) }]);
+        return;
+      }
+      if (line.startsWith("/remember ")) {
+        const note = line.slice(10).trim();
+        if (note) {
+          await appendMemory(note);
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Saved to memory: ${note}` }]);
+        }
+        return;
+      }
+
       // ── pipe ──
       if (line.startsWith("/pipe ")) {
         const pipeArgs = line.slice(6).trim();
@@ -2185,6 +2202,7 @@ function openTtyStdin(): tty.ReadStream | undefined {
 }
 
 export async function startRepl(agent: CodingAgent, options: StartReplOptions): Promise<void> {
+  agent.loadMemoryContext().catch(() => {});
   agent.getHooks().run("session-start", { source: "startup" }).catch(() => []);
   const ttyStdin = openTtyStdin();
   const instance = render(<App agent={agent} options={options} />, {

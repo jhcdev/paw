@@ -6,6 +6,7 @@ import { TeamRunner, autoConfigureTeam } from "./team.js";
 import { createProvider } from "./providers/index.js";
 import { HookManager } from "./hooks.js";
 import { Verifier } from "./verify.js";
+import { loadMemory } from "./memory.js";
 import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage } from "./types.js";
 import type { SafetyConfig } from "./safety.js";
 
@@ -19,6 +20,8 @@ export class CodingAgent {
   private currentModel: string;
   private readonly cwd: string;
   private mcpReady = false;
+  private memoryContext = "";
+  private memoryInjected = false;
   private totalUsage: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   private detectedProviders?: { provider: ProviderName; apiKey: string; model: string; baseUrl?: string }[];
   private verifyEnabled = false;
@@ -89,11 +92,22 @@ export class CodingAgent {
 
   clear(): void {
     this.provider.clear();
+    this.memoryInjected = false;
+  }
+
+  async loadMemoryContext(): Promise<string> {
+    const { context } = await loadMemory(this.cwd);
+    this.memoryContext = context;
+    return context;
   }
 
   async runTurn(prompt: string): Promise<AgentTurnResult> {
+    // Inject memory context on first turn of session
+    if (!this.memoryInjected && this.memoryContext) {
+      prompt = `[Context]\n${this.memoryContext}\n\n[User]\n${prompt}`;
+      this.memoryInjected = true;
+    }
     const preResults = await this.hooks.run("pre-turn", { prompt }).catch(() => []);
-    // Collect additionalContext from hooks and prepend to prompt
     const hookContext = preResults.filter(r => r.additionalContext).map(r => r.additionalContext).join("\n");
     if (hookContext) prompt = hookContext + "\n\n" + prompt;
     const actId = this.activityLog.start("agent", "thinking", prompt.slice(0, 50));
