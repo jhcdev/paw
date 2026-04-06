@@ -53,9 +53,19 @@ export class CodexProvider implements LlmProvider {
     return `[Previous conversation]\n${contextLines.join("\n")}\n\n[Current message]\n${prompt}`;
   }
 
+  /** Build full history as stdin context (no truncation) */
+  private buildStdinContext(): string {
+    if (this.history.length === 0) return "";
+    const recent = this.history.slice(-10);
+    const lines = recent.map((h) =>
+      h.role === "user" ? `[User]\n${h.text}` : `[Assistant]\n${h.text}`
+    );
+    return `<conversation_history>\n${lines.join("\n\n")}\n</conversation_history>\n\n`;
+  }
+
   async runTurn(prompt: string, _onChunk?: (chunk: string) => void, onStatus?: (status: string) => void): Promise<AgentTurnResult> {
-    const fullPrompt = this.buildPromptWithHistory(prompt);
     this.history.push({ role: "user", text: prompt });
+    const stdinContext = this.buildStdinContext();
 
     return new Promise((resolve) => {
       const args = [
@@ -63,20 +73,26 @@ export class CodexProvider implements LlmProvider {
         "--dangerously-bypass-approvals-and-sandbox",
         "-c", `model="${this.model}"`,
         "-c", `effort="${this.effort}"`,
-        fullPrompt,
+        prompt,
       ];
 
       const child = spawn("codex", args, {
         cwd: this.cwd,
-        stdio: ["ignore", "pipe", "pipe"], // Close stdin to prevent hanging
+        stdio: [stdinContext ? "pipe" : "ignore", "pipe", "pipe"],
         env: { ...process.env },
       });
+
+      // Pipe conversation history through stdin for full context
+      if (stdinContext && child.stdin) {
+        child.stdin.write(stdinContext);
+        child.stdin.end();
+      }
 
       let stdout = "";
       let stderr = "";
 
-      child.stdout.on("data", (data: Buffer) => { stdout += data.toString(); });
-      child.stderr.on("data", (data: Buffer) => {
+      child.stdout?.on("data", (data: Buffer) => { stdout += data.toString(); });
+      child.stderr?.on("data", (data: Buffer) => {
         const chunk = data.toString();
         stderr += chunk;
         if (onStatus) {
