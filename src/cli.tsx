@@ -258,7 +258,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   React.useEffect(() => {
     const freshEntries = agent.activityLog
       .getAll()
-      .filter((act) => (act.status === "done" || act.status === "error") && !persistedActivityIdsRef.current.has(act.id))
+      .filter((act) => (act.status === "done" || act.status === "error") && act.type !== "agent" && !persistedActivityIdsRef.current.has(act.id))
       .map((act) => ({ id: act.id, text: formatActivityForHistory(act) }))
       .filter((item): item is { id: string; text: string } => Boolean(item.text));
 
