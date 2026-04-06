@@ -1820,52 +1820,93 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
         if (route.mode === "auto") {
           setThinkMsg(`auto: ${route.reason}`);
+          const autoLines: string[] = [];
+          const autoStart = Date.now();
           const auto = new AutoAgent(options.cwd, (p) => agent.runTurn(p), (step) => {
             const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
-            setThinkMsg(`${icon} ${step.description}`);
+            const elapsed = step.ms ? ` (${(step.ms / 1000).toFixed(1)}s)` : "";
+            const label = `${icon} ${step.description}${elapsed}`;
+            setThinkMsg(label);
+            if (step.status === "running") {
+              autoLines.push(label);
+            } else {
+              // Update last line with final status
+              if (autoLines.length > 0) autoLines[autoLines.length - 1] = label;
+              // Show brief result for non-done steps
+              if (step.result && step.action !== "done") {
+                const brief = step.result.split("\n").slice(0, 2).map((l) => `  ⎿  ${l.slice(0, 80)}`).join("\n");
+                autoLines.push(brief);
+              }
+            }
+            setStreamingText(autoLines.map((l) => `● ${l}`).join("\n") + "\n");
           });
           const result = await auto.run(enrichedLine);
+          setStreamingText("");
           setTurnCount((c) => c + 1);
-          const output = result.steps
-            .filter((s) => s.action === "done" && s.result)
-            .map((s) => s.result).join("\n") || result.summary;
-          setEntries((c) => [...c, { role: "assistant", text: `[auto: ${result.success ? "DONE" : "INCOMPLETE"} ${(result.totalMs / 1000).toFixed(1)}s]\n${output}` }]);
+          const totalElapsed = ((Date.now() - autoStart) / 1000);
+          const cogLine = `✻ Cogitated for ${totalElapsed >= 60 ? `${Math.floor(totalElapsed / 60)}m ${Math.round(totalElapsed % 60)}s` : `${totalElapsed.toFixed(1)}s`}`;
+          const stepLog = autoLines.map((l) => `● ${l}`).join("\n");
+          const output = result.summary || result.steps.filter((s) => s.action === "done" && s.result).map((s) => s.result).join("\n");
+          setEntries((c) => [...c, { role: "assistant", text: `${stepLog}\n\n${cogLine}\n\n${output}` }]);
         } else if (route.mode === "pipe") {
+          const pipeStart = Date.now();
+          const pipeLines: string[] = [];
           setThinkMsg(`pipe: ${route.command}`);
-          const pipe = new PipeAgent(options.cwd, (p) => agent.runTurn(p), (msg) => setThinkMsg(msg));
+          pipeLines.push(`Bash(${route.command.slice(0, 60)})`);
+          setStreamingText(pipeLines.map((l) => `● ${l}`).join("\n") + "\n");
+          const pipe = new PipeAgent(options.cwd, (p) => agent.runTurn(p), (msg) => {
+            setThinkMsg(msg);
+            pipeLines.push(msg);
+            setStreamingText(pipeLines.map((l) => `● ${l}`).join("\n") + "\n");
+          });
           const result = route.subMode === "fix" ? await pipe.fix(route.command) : await pipe.analyze(route.command);
+          setStreamingText("");
           setTurnCount((c) => c + 1);
+          const pipeElapsed = ((Date.now() - pipeStart) / 1000);
           const header = result.fixed ? `FIXED (${result.iterations}x)` : result.mode === "analyze" ? "Analyzed" : `${result.iterations}x, not fixed`;
-          setEntries((c) => [...c, { role: "assistant", text: `[pipe: ${header} ${(result.totalMs / 1000).toFixed(1)}s]\n${result.analysis}` }]);
+          const pipeCog = `✻ Cogitated for ${pipeElapsed >= 60 ? `${Math.floor(pipeElapsed / 60)}m ${Math.round(pipeElapsed % 60)}s` : `${pipeElapsed.toFixed(1)}s`}`;
+          const pipeLog = pipeLines.map((l) => `● ${l}`).join("\n");
+          setEntries((c) => [...c, { role: "assistant", text: `${pipeLog}\n\n${pipeCog}\n\n${result.analysis}` }]);
         } else if (route.mode === "skill") {
+          const skillStart = Date.now();
           const skills = await loadSkills(options.cwd);
           const skill = skills.find((s) => s.name === route.skillName);
           if (skill && !skill.disableModelInvocation) {
             setThinkMsg(`skill: /${route.skillName}`);
+            setStreamingText(`● Skill(/${route.skillName})\n`);
             const fullPrompt = await renderSkill(skill, route.context, options.cwd);
             const result = await agent.runTurn(fullPrompt);
+            setStreamingText("");
             setTurnCount((c) => c + 1);
-            setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty)" }]);
+            const skillElapsed = ((Date.now() - skillStart) / 1000);
+            const skillCog = `✻ Cogitated for ${skillElapsed.toFixed(1)}s`;
+            setEntries((c) => [...c, { role: "assistant", text: `● Skill(/${route.skillName}) (${skillElapsed.toFixed(1)}s)\n\n${skillCog}\n\n${result.text || "(empty)"}` }]);
           } else {
-            // Skill not found, fall through to solo
             setThinkMsg(randomCatMood());
             const result = await agent.runTurn(enrichedLine);
             setTurnCount((c) => c + 1);
             setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty)" }]);
           }
         } else if (route.mode === "team" && agent.getTeam().isReady()) {
+          const teamStart = Date.now();
+          const teamLines: string[] = [];
           let currentPhaseId: string | null = null;
           const result = await agent.getTeam().run(enrichedLine, (phase, provider, mdl) => {
             if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
             currentPhaseId = agent.activityLog.start("agent", `${phase}`, `${provider}/${mdl}`);
-            setThinkMsg(`${phase} (${provider}/${mdl})...`);
+            const label = `${phase} (${provider}/${mdl})`;
+            setThinkMsg(label);
+            teamLines.push(label);
+            setStreamingText(teamLines.map((l) => `● ${l}`).join("\n") + "\n");
           });
           if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
-          const output = result.phases.map((p) =>
-            `--- ${p.role.toUpperCase()} (${p.provider}/${p.model}, ${p.ms}ms) ---\n${p.text}`
-          ).join("\n\n") + `\n\nTotal: ${result.totalMs}ms`;
+          setStreamingText("");
           setTurnCount((c) => c + 1);
-          setEntries((c) => [...c, { role: "assistant", text: output }]);
+          const teamElapsed = ((Date.now() - teamStart) / 1000);
+          const teamCog = `✻ Cogitated for ${teamElapsed >= 60 ? `${Math.floor(teamElapsed / 60)}m ${Math.round(teamElapsed % 60)}s` : `${teamElapsed.toFixed(1)}s`}`;
+          const teamLog = result.phases.map((p) => `● ${p.role} (${p.provider}/${p.model}) (${(p.ms / 1000).toFixed(1)}s)`).join("\n");
+          const teamOutput = result.phases.map((p) => p.text).join("\n\n");
+          setEntries((c) => [...c, { role: "assistant", text: `${teamLog}\n\n${teamCog}\n\n${teamOutput}` }]);
         } else {
           // Solo mode — stream response in real-time
           setThinkMsg(randomCatMood());
