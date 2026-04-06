@@ -1834,14 +1834,25 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           // Solo mode — stream response in real-time
           setThinkMsg(randomCatMood());
           setStreamingText("");
+          const turnTools: string[] = [];
           const result = await agent.runTurn(
             enrichedLine,
             (chunk) => { setStreamingText((prev) => prev + chunk); },
-            (status) => { setThinkMsg(status); },
+            (status) => {
+              setThinkMsg(status);
+              if (status.startsWith("tool: ")) {
+                turnTools.push(status.slice(6));
+              } else if (/^(reading|writing|running|searching)\b/i.test(status)) {
+                turnTools.push(status);
+              }
+            },
           );
           setStreamingText("");
           setTurnCount((c) => c + 1);
-          setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
+          const toolSummary = turnTools.length > 0
+            ? turnTools.map((t) => `  ⏺ ${t}`).join("\n") + "\n\n"
+            : "";
+          setEntries((c) => [...c, { role: "assistant", text: toolSummary + (result.text || "(empty response)") }]);
           const stopResult = await agent.runStopHook();
           if (stopResult.blocked && stopResult.reason) {
             setEntries(c => [...c, { role: "system", text: `Hook feedback: ${stopResult.reason}` }]);
@@ -2545,30 +2556,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       {!activityView && turnCount > 0 ? (() => {
         const running = agent.activityLog.getRunning();
-        const recent = agent.activityLog.getAll()
-          .filter((a) => a.status !== "running")
-          .slice(-5);
-        if (running.length === 0 && recent.length === 0) return null;
+        if (running.length === 0) return null;
         return (
           <Box flexDirection="column" paddingX={2}>
-            {recent.map((act) => {
-              const elapsed = `${(((act.finishedAt ?? Date.now()) - act.startedAt) / 1000).toFixed(1)}s`;
-              const icon = act.status === "done" ? "✓" : "✗";
-              const color = act.status === "done" ? "#668866" : "#886666";
-              return (
-                <Box key={act.id} flexDirection="row">
-                  <Text color={color}>{`  ${icon} `}</Text>
-                  <Text color={color} dimColor>{act.name} ({elapsed}){act.detail ? ` — ${act.detail.slice(0, 60)}` : ""}</Text>
-                </Box>
-              );
-            })}
             {running.map((act) => (
               <Box key={act.id} flexDirection="row">
                 <Text color="yellow">{"  ◉ "}</Text>
                 <Text color="gray">{act.name}...</Text>
               </Box>
             ))}
-            {(running.length > 0 || recent.length > 0) ? <Text color="gray" italic>  ↓ to inspect</Text> : null}
           </Box>
         );
       })() : null}
