@@ -1870,23 +1870,59 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           // Solo mode — stream response in real-time
           setThinkMsg(randomCatMood());
           setStreamingText("");
-          const turnTools: string[] = [];
+          const toolLines: string[] = [];
+          let lastToolKey = "";
           const result = await agent.runTurn(
             enrichedLine,
-            (chunk) => { setStreamingText((prev) => prev + chunk); },
+            (chunk) => {
+              const prefix = toolLines.length > 0 ? toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n\n" : "";
+              setStreamingText((prev) => {
+                // If prev only has tool lines, start fresh with prefix + chunk
+                if (!prev.includes("\n\n")) return prefix + chunk;
+                return prev + chunk;
+              });
+            },
             (status) => {
               setThinkMsg(status);
               if (status.startsWith("tool: ")) {
-                turnTools.push(status.slice(6));
-              } else if (/^(reading|writing|running|searching)\b/i.test(status)) {
-                turnTools.push(status);
+                const label = status.slice(6);
+                // Status with timing = completed tool; update last line
+                if (/\(\d+\.\d+s\)$/.test(label)) {
+                  if (toolLines.length > 0) toolLines[toolLines.length - 1] = label;
+                  setStreamingText(toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n");
+                } else {
+                  // New tool starting — deduplicate consecutive same tool
+                  const key = label.replace(/\s+$/, "");
+                  if (key === lastToolKey && toolLines.length > 0) {
+                    const prev = toolLines[toolLines.length - 1];
+                    const match = prev.match(/\s×(\d+)$/);
+                    const count = match ? parseInt(match[1], 10) + 1 : 2;
+                    toolLines[toolLines.length - 1] = `${key} ×${count}`;
+                  } else {
+                    toolLines.push(label);
+                  }
+                  lastToolKey = key;
+                  setStreamingText(toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n");
+                }
+              } else if (/^(reading|writing|running|searching|thinking)\b/i.test(status)) {
+                const key = status;
+                if (key === lastToolKey && toolLines.length > 0) {
+                  const prev = toolLines[toolLines.length - 1];
+                  const match = prev.match(/\s×(\d+)$/);
+                  const count = match ? parseInt(match[1], 10) + 1 : 2;
+                  toolLines[toolLines.length - 1] = `${key} ×${count}`;
+                } else {
+                  toolLines.push(status);
+                }
+                lastToolKey = key;
+                setStreamingText(toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n");
               }
             },
           );
           setStreamingText("");
           setTurnCount((c) => c + 1);
-          const toolSummary = turnTools.length > 0
-            ? turnTools.map((t) => `  ⏺ ${t}`).join("\n") + "\n\n"
+          const toolSummary = toolLines.length > 0
+            ? toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n\n"
             : "";
           setEntries((c) => [...c, { role: "assistant", text: toolSummary + (result.text || "(empty response)") }]);
           const stopResult = await agent.runStopHook();

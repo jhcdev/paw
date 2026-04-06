@@ -88,7 +88,7 @@ export class CodexProvider implements LlmProvider {
             else if (trimmed.includes("writing") || trimmed.includes("Writing")) { onStatus(`writing file...`); }
             else if (trimmed.includes("running") || trimmed.includes("Running") || trimmed.includes("exec")) { onStatus(`running command...`); }
             else if (trimmed.includes("searching") || trimmed.includes("Searching")) { onStatus(`searching...`); }
-            else if (trimmed.length > 5 && trimmed.length < 100) { onStatus(trimmed); }
+            else if (trimmed.includes("thinking") || trimmed.includes("Thinking")) { onStatus(`thinking...`); }
           }
         }
       });
