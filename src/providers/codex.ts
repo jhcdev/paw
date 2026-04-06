@@ -45,10 +45,10 @@ export class CodexProvider implements LlmProvider {
   buildPromptWithHistory(prompt: string): string {
     if (this.history.length === 0) return prompt;
 
-    // Include last 10 turns as context (keep prompt size reasonable)
+    // Include last 10 turns — allow more context for complex multi-turn tasks
     const recent = this.history.slice(-10);
     const contextLines = recent.map((h) =>
-      h.role === "user" ? `> ${h.text.slice(0, 300)}` : `AI: ${h.text.slice(0, 300)}`
+      h.role === "user" ? `> ${h.text.slice(0, 800)}` : `AI: ${h.text.slice(0, 2000)}`
     );
     return `[Previous conversation]\n${contextLines.join("\n")}\n\n[Current message]\n${prompt}`;
   }

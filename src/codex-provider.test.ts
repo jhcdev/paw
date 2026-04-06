@@ -56,17 +56,21 @@ describe("CodexProvider — conversation history", () => {
     expect(prompt).not.toContain("AI: response 0");
   });
 
-  it("truncates long messages in history to 300 chars", () => {
+  it("truncates long messages in history", () => {
     const provider = new CodexProvider({ model: "gpt-5.4", cwd: "/tmp" });
-    const longMessage = "A".repeat(500);
+    const longMessage = "A".repeat(3000);
     provider.pushHistory("user", longMessage);
-    provider.pushHistory("assistant", "ok");
+    provider.pushHistory("assistant", "B".repeat(3000));
 
     const prompt = provider.buildPromptWithHistory("next");
     const historySection = prompt.split("[Current message]")[0]!;
-    // Should not contain the full 500 chars
+    // User messages truncated to 800, assistant to 2000
     const aCount = (historySection.match(/A/g) ?? []).length;
-    expect(aCount).toBeLessThan(500); // truncated from 500, not full length
+    const bCount = (historySection.match(/B/g) ?? []).length;
+    expect(aCount).toBeLessThan(3000);
+    expect(aCount).toBeLessThanOrEqual(810);
+    expect(bCount).toBeLessThan(3000);
+    expect(bCount).toBeLessThanOrEqual(2010);
   });
 
   it("multiple turns accumulate history", () => {
