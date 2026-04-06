@@ -1909,18 +1909,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                   lastToolKey = key;
                 }
                 setStreamingText(toolLines.map((t) => `● ${t.split("\n")[0]}${t.includes("\n") ? "\n" + t.split("\n").slice(1).join("\n") : ""}`).join("\n") + "\n");
-              } else if (/^(reading|writing|running|searching|thinking)\b/i.test(status)) {
-                const key = status;
-                if (key === lastToolKey && toolLines.length > 0) {
-                  const prev = toolLines[toolLines.length - 1];
-                  const match = prev.match(/\s×(\d+)$/);
-                  const count = match ? parseInt(match[1], 10) + 1 : 2;
-                  toolLines[toolLines.length - 1] = `${key} ×${count}`;
-                } else {
-                  toolLines.push(status);
-                }
-                lastToolKey = key;
-                setStreamingText(toolLines.map((t) => `● ${t.split("\n")[0]}${t.includes("\n") ? "\n" + t.split("\n").slice(1).join("\n") : ""}`).join("\n") + "\n");
               }
             },
           );
