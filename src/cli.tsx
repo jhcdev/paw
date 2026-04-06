@@ -1872,10 +1872,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setStreamingText("");
           const toolLines: string[] = [];
           let lastToolKey = "";
+          const turnStart = Date.now();
           const result = await agent.runTurn(
             enrichedLine,
             (chunk) => {
-              const prefix = toolLines.length > 0 ? toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n\n" : "";
+              const prefix = toolLines.length > 0 ? toolLines.map((t) => `● ${t.split("\n")[0]}${t.includes("\n") ? "\n" + t.split("\n").slice(1).join("\n") : ""}`).join("\n") + "\n\n" : "";
               setStreamingText((prev) => {
                 // If prev only has tool lines, start fresh with prefix + chunk
                 if (!prev.includes("\n\n")) return prefix + chunk;
@@ -1888,9 +1889,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               if (status.startsWith("tool: ")) {
                 const full = status.slice(6);
                 const label = firstLine.slice(6);
-                // Status with timing = completed tool; update last entry
-                if (/\(\d+\.\d+s\)$/.test(label)) {
-                  if (toolLines.length > 0) toolLines[toolLines.length - 1] = label;
+                // Status with timing = completed tool; update last entry with result info
+                if (/\(\d+\.\d+s\)/.test(label)) {
+                  const resultPart = full.includes("\n") ? "\n" + full.split("\n").slice(1).join("\n") : "";
+                  if (toolLines.length > 0) toolLines[toolLines.length - 1] = label + resultPart;
                 } else {
                   // New tool starting — deduplicate consecutive same tool
                   const key = label.replace(/\s+$/, "");
@@ -1906,7 +1908,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                   }
                   lastToolKey = key;
                 }
-                setStreamingText(toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n");
+                setStreamingText(toolLines.map((t) => `● ${t.split("\n")[0]}${t.includes("\n") ? "\n" + t.split("\n").slice(1).join("\n") : ""}`).join("\n") + "\n");
               } else if (/^(reading|writing|running|searching|thinking)\b/i.test(status)) {
                 const key = status;
                 if (key === lastToolKey && toolLines.length > 0) {
@@ -1918,15 +1920,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                   toolLines.push(status);
                 }
                 lastToolKey = key;
-                setStreamingText(toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n");
+                setStreamingText(toolLines.map((t) => `● ${t.split("\n")[0]}${t.includes("\n") ? "\n" + t.split("\n").slice(1).join("\n") : ""}`).join("\n") + "\n");
               }
             },
           );
           setStreamingText("");
           setTurnCount((c) => c + 1);
+          const turnElapsed = ((Date.now() - turnStart) / 1000);
+          const thinkLine = turnElapsed >= 1 ? `✻ Cogitated for ${turnElapsed >= 60 ? `${Math.floor(turnElapsed / 60)}m ${Math.round(turnElapsed % 60)}s` : `${turnElapsed.toFixed(1)}s`}\n\n` : "";
           const toolSummary = toolLines.length > 0
-            ? toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n\n"
-            : "";
+            ? toolLines.map((t) => `● ${t.split("\n")[0]}${t.includes("\n") ? "\n" + t.split("\n").slice(1).join("\n") : ""}`).join("\n") + "\n\n" + thinkLine
+            : thinkLine;
           setEntries((c) => [...c, { role: "assistant", text: toolSummary + (result.text || "(empty response)") }]);
           const stopResult = await agent.runStopHook();
           if (stopResult.blocked && stopResult.reason) {

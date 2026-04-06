@@ -12,17 +12,17 @@ function truncLine(s: string, n = 60): string {
 function formatToolStatus(name: string, input: Record<string, unknown>): string {
   const p = (key: string) => typeof input[key] === "string" ? input[key] as string : "";
   switch (name) {
-    case "read_file": return `tool: Read ${p("path")}`;
+    case "read_file": return `tool: Read(${p("path")})`;
     case "write_file": {
       const lines = p("content").split("\n").length;
-      return `tool: Write ${p("path")} (${lines} lines)`;
+      return `tool: Write(${p("path")}) ${lines} lines`;
     }
-    case "edit_file": return `tool: Edit ${p("path")}`;
-    case "list_files": return `tool: List ${p("path") || "."}`;
+    case "edit_file": return `tool: Update(${p("path")})`;
+    case "list_files": return `tool: List(${p("path") || "."})`;
     case "search_text": return `tool: Search "${p("query")}"${p("path") ? ` in ${p("path")}` : ""}`;
-    case "run_shell": return `tool: Bash ${truncLine(p("command"))}`;
-    case "glob": return `tool: Glob ${p("pattern")}`;
-    case "web_fetch": return `tool: Fetch ${truncLine(p("url"))}`;
+    case "run_shell": return `tool: Bash(${truncLine(p("command"))})`;
+    case "glob": return `tool: Glob(${p("pattern")})`;
+    case "web_fetch": return `tool: Fetch(${truncLine(p("url"))})`;
     default: return `tool: ${name}`;
   }
 }
@@ -30,11 +30,35 @@ function formatToolStatus(name: string, input: Record<string, unknown>): string 
 function formatToolDiff(name: string, input: Record<string, unknown>): string | null {
   const p = (key: string) => typeof input[key] === "string" ? input[key] as string : "";
   if (name === "edit_file") {
-    const oldLines = p("old_string").split("\n").slice(0, 3).map((l) => `  - ${truncLine(l, 70)}`);
-    const newLines = p("new_string").split("\n").slice(0, 3).map((l) => `  + ${truncLine(l, 70)}`);
-    const oldExtra = p("old_string").split("\n").length > 3 ? `  - … (${p("old_string").split("\n").length} lines)` : "";
-    const newExtra = p("new_string").split("\n").length > 3 ? `  + … (${p("new_string").split("\n").length} lines)` : "";
-    return [...oldLines, ...(oldExtra ? [oldExtra] : []), ...newLines, ...(newExtra ? [newExtra] : [])].join("\n");
+    const oldCount = p("old_string").split("\n").length;
+    const newCount = p("new_string").split("\n").length;
+    const added = Math.max(0, newCount - oldCount) + Math.min(oldCount, newCount);
+    const removed = Math.max(0, oldCount - newCount) + Math.min(oldCount, newCount);
+    const summary = `  ⎿  Added ${newCount} lines, removed ${oldCount} lines`;
+    const oldLines = p("old_string").split("\n").slice(0, 4).map((l) => `     - ${truncLine(l, 70)}`);
+    const newLines = p("new_string").split("\n").slice(0, 4).map((l) => `     + ${truncLine(l, 70)}`);
+    const oldExtra = oldCount > 4 ? `     - … (+${oldCount - 4} more)` : "";
+    const newExtra = newCount > 4 ? `     + … (+${newCount - 4} more)` : "";
+    return [summary, ...oldLines, ...(oldExtra ? [oldExtra] : []), ...newLines, ...(newExtra ? [newExtra] : [])].join("\n");
+  }
+  return null;
+}
+
+function formatToolResult(name: string, result: { content: string; isError?: boolean }): string | null {
+  if (name === "run_shell") {
+    const lines = result.content.split("\n").filter((l) => l.trim());
+    if (lines.length === 0) return null;
+    const shown = lines.slice(0, 5).map((l) => `  ⎿  ${truncLine(l, 80)}`);
+    if (lines.length > 5) shown.push(`  ⎿  … (+${lines.length - 5} lines)`);
+    return shown.join("\n");
+  }
+  if (name === "read_file") {
+    const lines = result.content.split("\n").length;
+    return `  ⎿  ${lines} lines`;
+  }
+  if (name === "search_text" || name === "glob") {
+    const lines = result.content.split("\n").filter((l) => l.trim());
+    return `  ⎿  ${lines.length} results`;
   }
   return null;
 }
@@ -146,8 +170,8 @@ export class AnthropicProvider implements LlmProvider {
         try {
           const result = await handler(toolUse.input as Record<string, unknown>, this.cwd);
           const elapsed = ((Date.now() - toolStart) / 1000).toFixed(1);
-          const brief = toolUse.name === "run_shell" ? (result.isError ? "[error]" : "[ok]") : "";
-          if (onStatus) onStatus(`${toolLabel} ${brief} (${elapsed}s)`);
+          const resultInfo = formatToolResult(toolUse.name, result) ?? "";
+          if (onStatus) onStatus(`${toolLabel} (${elapsed}s)${resultInfo ? "\n" + resultInfo : ""}`);
           const tr: ToolResultBlockParam = { type: "tool_result", tool_use_id: toolUse.id, content: result.content };
           if (result.isError) tr.is_error = true;
           toolResults.push(tr);
