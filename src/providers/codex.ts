@@ -80,21 +80,20 @@ export class CodexProvider implements LlmProvider {
         const chunk = data.toString();
         stderr += chunk;
         if (onStatus) {
-          // Parse Codex stderr for meaningful activity info — emit as tool: prefixed
+          // Parse Codex stderr — format is: "exec\n/bin/bash -lc <cmd> in <cwd>\n succeeded in <time>:"
           for (const line of chunk.split("\n")) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith("warning:") || trimmed.startsWith("Warning")) continue;
-            // Try to extract file path or command from the line
-            const clean = (s: string) => s.trim().replace(/[()[\]`"]+$/g, "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").slice(0, 60);
-            const pathMatch = trimmed.match(/(?:reading|read)\s+(.+)/i);
-            const writeMatch = trimmed.match(/(?:writing|wrote)\s+(.+)/i);
-            const cmdMatch = trimmed.match(/(?:running|ran|exec)\s+(.+)/i);
-            const searchMatch = trimmed.match(/(?:searching|search|grep)\s+(.+)/i);
-            if (pathMatch) { onStatus(`tool: Read(${clean(pathMatch[1])})`); }
-            else if (writeMatch) { onStatus(`tool: Write(${clean(writeMatch[1])})`); }
-            else if (cmdMatch) { onStatus(`tool: Bash(${clean(cmdMatch[1])})`); }
-            else if (searchMatch) { onStatus(`tool: Search(${clean(searchMatch[1])})`); }
-            else if (/thinking|Thinking/i.test(trimmed)) { onStatus(`thinking...`); }
+            // Match command execution lines: /bin/bash -lc "cmd" in /path
+            const execMatch = trimmed.match(/^\/bin\/bash\s+-lc\s+(.+?)\s+in\s+\//);
+            if (execMatch) {
+              const cmd = execMatch[1].replace(/^["']|["']$/g, "").slice(0, 60);
+              if (cmd.startsWith("cat ") || cmd.startsWith("sed ")) { onStatus(`tool: Read(${cmd.slice(4).trim()})`); }
+              else if (cmd.startsWith("rg ")) { onStatus(`tool: Search(${cmd.slice(3).trim()})`); }
+              else { onStatus(`tool: Bash(${cmd})`); }
+            }
+            // Match "codex" thinking lines
+            else if (trimmed === "codex") { onStatus(`thinking...`); }
           }
         }
       });
