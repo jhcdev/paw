@@ -85,14 +85,15 @@ export class CodexProvider implements LlmProvider {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith("warning:") || trimmed.startsWith("Warning")) continue;
             // Try to extract file path or command from the line
-            const pathMatch = trimmed.match(/(?:reading|read|Reading|Read)\s+(.+)/i);
-            const writeMatch = trimmed.match(/(?:writing|wrote|Writing|Wrote)\s+(.+)/i);
-            const cmdMatch = trimmed.match(/(?:running|ran|exec|Running|Ran)\s+[`"]?(.+?)[`"]?\s*$/i);
-            const searchMatch = trimmed.match(/(?:searching|search|grep|Searching)\s+(.+)/i);
-            if (pathMatch) { onStatus(`tool: Read(${pathMatch[1].trim().slice(0, 60)})`); }
-            else if (writeMatch) { onStatus(`tool: Write(${writeMatch[1].trim().slice(0, 60)})`); }
-            else if (cmdMatch) { onStatus(`tool: Bash(${cmdMatch[1].trim().slice(0, 60)})`); }
-            else if (searchMatch) { onStatus(`tool: Search(${searchMatch[1].trim().slice(0, 60)})`); }
+            const clean = (s: string) => s.trim().replace(/[()[\]`"]+$/g, "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").slice(0, 60);
+            const pathMatch = trimmed.match(/(?:reading|read)\s+(.+)/i);
+            const writeMatch = trimmed.match(/(?:writing|wrote)\s+(.+)/i);
+            const cmdMatch = trimmed.match(/(?:running|ran|exec)\s+(.+)/i);
+            const searchMatch = trimmed.match(/(?:searching|search|grep)\s+(.+)/i);
+            if (pathMatch) { onStatus(`tool: Read ${clean(pathMatch[1])}`); }
+            else if (writeMatch) { onStatus(`tool: Write ${clean(writeMatch[1])}`); }
+            else if (cmdMatch) { onStatus(`tool: Bash ${clean(cmdMatch[1])}`); }
+            else if (searchMatch) { onStatus(`tool: Search ${clean(searchMatch[1])}`); }
             else if (/thinking|Thinking/i.test(trimmed)) { onStatus(`thinking...`); }
           }
         }
