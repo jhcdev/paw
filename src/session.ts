@@ -20,6 +20,7 @@ export type SessionData = {
   createdAt: string;
   updatedAt: string;
   entries: SessionEntry[];
+  inputHistory?: string[];
   writerId?: string;
 };
 

@@ -141,6 +141,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const lastEnterRef = React.useRef(0);
   const inputRef = React.useRef("");
   const [cancelRef] = useState({ current: false });
+  const inputHistoryRef = React.useRef<string[]>(options.existingSession?.inputHistory ?? []);
+  const historyIdxRef = React.useRef(-1);
+  const historySavedRef = React.useRef("");
   const [thinkMsg, setThinkMsg] = useState("purring softly...");
   const [streamingText, setStreamingText] = useState("");
   const [pendingDisplay, setPendingDisplay] = useState<string[]>([]);
@@ -287,6 +290,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         entries: entries.map((e) => ({ role: e.role, text: e.text, timestamp: new Date().toISOString() })),
+        inputHistory: inputHistoryRef.current,
         writerId,
       };
       saveSession(data).catch(() => {});
@@ -385,10 +389,38 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
 
-    // ↓ = enter activity selector (below input, when no other panel active)
-    if (key.downArrow && suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off" && !activityView) {
-      const acts = agent.activityLog.getRecent(5);
-      if (acts.length > 0) { setActivityCursor(0); setActivityView("__select__"); return; }
+    // ↑↓ = input history navigation (when no panels/suggestions active)
+    const noPanel = suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off" && !activityView;
+    if ((key.upArrow || key.downArrow) && noPanel) {
+      const hist = inputHistoryRef.current;
+      if (hist.length === 0) return;
+      // Save current input when first entering history
+      if (historyIdxRef.current === -1) {
+        historySavedRef.current = inputRef.current;
+      }
+      // Total slots = history entries + saved draft (at the end)
+      const total = hist.length + 1;
+      const curSlot = historyIdxRef.current === -1 ? hist.length : historyIdxRef.current;
+      const nextSlot = key.upArrow
+        ? (curSlot - 1 + total) % total
+        : (curSlot + 1) % total;
+      if (nextSlot === hist.length) {
+        // Back to saved draft
+        historyIdxRef.current = -1;
+        const val = historySavedRef.current;
+        inputRef.current = val;
+        cursorRef.current = [...val].length;
+        setInput(val);
+        setCursorPos([...val].length);
+      } else {
+        historyIdxRef.current = nextSlot;
+        const val = hist[nextSlot];
+        inputRef.current = val;
+        cursorRef.current = [...val].length;
+        setInput(val);
+        setCursorPos([...val].length);
+      }
+      return;
     }
 
     // Ctrl+L = clear
@@ -853,6 +885,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off") {
       const value = inputRef.current;
       if (!value.trim()) return;
+      inputHistoryRef.current.push(value);
+      if (inputHistoryRef.current.length > 100) inputHistoryRef.current.shift();
+      historyIdxRef.current = -1;
+      historySavedRef.current = "";
       inputRef.current = "";
       cursorRef.current = 0;
       setInput("");
