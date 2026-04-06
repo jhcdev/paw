@@ -80,17 +80,34 @@ export class CodexProvider implements LlmProvider {
         const chunk = data.toString();
         stderr += chunk;
         if (onStatus) {
-          // Parse Codex stderr — format is: "exec\n/bin/bash -lc <cmd> in <cwd>\n succeeded in <time>:"
+          // Parse Codex stderr — known patterns:
+          // exec: "/bin/bash -lc <cmd> in <cwd>"
+          // patch: "apply patch" → "patch: completed" → "<filepath>" → "diff --git ..."
           for (const line of chunk.split("\n")) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith("warning:") || trimmed.startsWith("Warning")) continue;
-            // Match command execution lines: /bin/bash -lc "cmd" in /path
+            // Match command execution: /bin/bash -lc "cmd" in /path
             const execMatch = trimmed.match(/^\/bin\/bash\s+-lc\s+(.+?)\s+in\s+\//);
             if (execMatch) {
               const cmd = execMatch[1].replace(/^["']|["']$/g, "").slice(0, 60);
               if (cmd.startsWith("cat ") || cmd.startsWith("sed ")) { onStatus(`tool: Read(${cmd.slice(4).trim()})`); }
               else if (cmd.startsWith("rg ")) { onStatus(`tool: Search(${cmd.slice(3).trim()})`); }
               else { onStatus(`tool: Bash(${cmd})`); }
+            }
+            // Match file write via patch: "patch: completed" followed by file path
+            else if (trimmed === "apply patch") { onStatus(`tool: Write ...`); }
+            else if (trimmed.startsWith("patch:") && trimmed.includes("completed")) { /* skip */ }
+            else if (/^diff --git/.test(trimmed)) {
+              const diffMatch = trimmed.match(/^diff --git\s+\S+\s+b\/(.+)/);
+              if (diffMatch) {
+                // Collect +/- lines from the diff in the same chunk
+                const diffLines = chunk.split("\n")
+                  .filter((l) => /^\+[^+]/.test(l) || /^-[^-]/.test(l))
+                  .slice(0, 4)
+                  .map((l) => `     ${l.slice(0, 70)}`);
+                const detail = diffLines.length > 0 ? `\n  ⎿  ${diffLines.length} change(s)\n${diffLines.join("\n")}` : "";
+                onStatus(`tool: Update(${diffMatch[1].slice(0, 60)})${detail}`);
+              }
             }
             // Match "codex" thinking lines
             else if (trimmed === "codex") { onStatus(`thinking...`); }
