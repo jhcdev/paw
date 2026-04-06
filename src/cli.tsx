@@ -1873,36 +1873,67 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         } else if (route.mode === "pipe") {
           const pipeStart = Date.now();
           const pipeLines: string[] = [];
+          const renderPipe = () => setStreamingText(pipeLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n") + "\n");
           setThinkMsg(`pipe: ${route.command}`);
           pipeLines.push(`Bash(${route.command.slice(0, 60)})`);
-          setStreamingText(pipeLines.map((l) => `● ${l}`).join("\n") + "\n");
-          const pipe = new PipeAgent(options.cwd, (p) => agent.runTurn(p), (msg) => {
+          renderPipe();
+          const pipeToolStatus = (status: string) => {
+            if (status.startsWith("tool: ")) {
+              const label = status.slice(6);
+              const firstLine = label.split("\n")[0];
+              setThinkMsg(firstLine);
+              if (/\(\d+\.\d+s\)/.test(firstLine)) {
+                for (let i = pipeLines.length - 1; i >= 0; i--) {
+                  if (pipeLines[i].startsWith("  ● ")) { pipeLines[i] = `  ● ${label}`; break; }
+                }
+              } else {
+                pipeLines.push(`  ● ${label}`);
+              }
+              renderPipe();
+            }
+          };
+          const pipe = new PipeAgent(options.cwd, (p) => agent.runTurn(p, undefined, pipeToolStatus), (msg) => {
             setThinkMsg(msg);
             pipeLines.push(msg);
-            setStreamingText(pipeLines.map((l) => `● ${l}`).join("\n") + "\n");
+            renderPipe();
           });
           const result = route.subMode === "fix" ? await pipe.fix(route.command) : await pipe.analyze(route.command);
           setStreamingText("");
           setTurnCount((c) => c + 1);
           const pipeElapsed = ((Date.now() - pipeStart) / 1000);
-          const header = result.fixed ? `FIXED (${result.iterations}x)` : result.mode === "analyze" ? "Analyzed" : `${result.iterations}x, not fixed`;
           const pipeCog = `✻ Cogitated for ${pipeElapsed >= 60 ? `${Math.floor(pipeElapsed / 60)}m ${Math.round(pipeElapsed % 60)}s` : `${pipeElapsed.toFixed(1)}s`}`;
-          const pipeLog = pipeLines.map((l) => `● ${l}`).join("\n");
+          const pipeLog = pipeLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
           setEntries((c) => [...c, { role: "assistant", text: `${pipeLog}\n\n${pipeCog}\n\n${result.analysis}` }]);
         } else if (route.mode === "skill") {
           const skillStart = Date.now();
           const skills = await loadSkills(options.cwd);
           const skill = skills.find((s) => s.name === route.skillName);
           if (skill && !skill.disableModelInvocation) {
+            const skillLines: string[] = [`Skill(/${route.skillName})`];
+            const renderSkillLines = () => setStreamingText(skillLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n") + "\n");
             setThinkMsg(`skill: /${route.skillName}`);
-            setStreamingText(`● Skill(/${route.skillName})\n`);
+            renderSkillLines();
             const fullPrompt = await renderSkill(skill, route.context, options.cwd);
-            const result = await agent.runTurn(fullPrompt);
+            const result = await agent.runTurn(fullPrompt, undefined, (status) => {
+              if (status.startsWith("tool: ")) {
+                const label = status.slice(6);
+                setThinkMsg(label.split("\n")[0]);
+                if (/\(\d+\.\d+s\)/.test(label.split("\n")[0])) {
+                  for (let i = skillLines.length - 1; i >= 0; i--) {
+                    if (skillLines[i].startsWith("  ● ")) { skillLines[i] = `  ● ${label}`; break; }
+                  }
+                } else {
+                  skillLines.push(`  ● ${label}`);
+                }
+                renderSkillLines();
+              }
+            });
             setStreamingText("");
             setTurnCount((c) => c + 1);
             const skillElapsed = ((Date.now() - skillStart) / 1000);
             const skillCog = `✻ Cogitated for ${skillElapsed.toFixed(1)}s`;
-            setEntries((c) => [...c, { role: "assistant", text: `● Skill(/${route.skillName}) (${skillElapsed.toFixed(1)}s)\n\n${skillCog}\n\n${result.text || "(empty)"}` }]);
+            const skillLog = skillLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
+            setEntries((c) => [...c, { role: "assistant", text: `${skillLog}\n\n${skillCog}\n\n${result.text || "(empty)"}` }]);
           } else {
             setThinkMsg(randomCatMood());
             const result = await agent.runTurn(enrichedLine);
