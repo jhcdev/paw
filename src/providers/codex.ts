@@ -90,10 +90,10 @@ export class CodexProvider implements LlmProvider {
             const writeMatch = trimmed.match(/(?:writing|wrote)\s+(.+)/i);
             const cmdMatch = trimmed.match(/(?:running|ran|exec)\s+(.+)/i);
             const searchMatch = trimmed.match(/(?:searching|search|grep)\s+(.+)/i);
-            if (pathMatch) { onStatus(`tool: Read ${clean(pathMatch[1])}`); }
-            else if (writeMatch) { onStatus(`tool: Write ${clean(writeMatch[1])}`); }
-            else if (cmdMatch) { onStatus(`tool: Bash ${clean(cmdMatch[1])}`); }
-            else if (searchMatch) { onStatus(`tool: Search ${clean(searchMatch[1])}`); }
+            if (pathMatch) { onStatus(`tool: Read(${clean(pathMatch[1])})`); }
+            else if (writeMatch) { onStatus(`tool: Write(${clean(writeMatch[1])})`); }
+            else if (cmdMatch) { onStatus(`tool: Bash(${clean(cmdMatch[1])})`); }
+            else if (searchMatch) { onStatus(`tool: Search(${clean(searchMatch[1])})`); }
             else if (/thinking|Thinking/i.test(trimmed)) { onStatus(`thinking...`); }
           }
         }
