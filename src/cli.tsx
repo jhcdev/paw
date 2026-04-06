@@ -1943,16 +1943,32 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         } else if (route.mode === "team" && agent.getTeam().isReady()) {
           const teamStart = Date.now();
           const teamLines: string[] = [];
+          const renderTeam = () => setStreamingText(teamLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n") + "\n");
           let currentPhaseId: string | null = null;
+          agent.getTeam().setToolStatusCallback((status) => {
+            if (status.startsWith("tool: ")) {
+              const label = status.slice(6);
+              setThinkMsg(label.split("\n")[0]);
+              if (/\(\d+\.\d+s\)/.test(label.split("\n")[0])) {
+                for (let i = teamLines.length - 1; i >= 0; i--) {
+                  if (teamLines[i].startsWith("  ● ")) { teamLines[i] = `  ● ${label}`; break; }
+                }
+              } else {
+                teamLines.push(`  ● ${label}`);
+              }
+              renderTeam();
+            }
+          });
           const result = await agent.getTeam().run(enrichedLine, (phase, provider, mdl) => {
             if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
             currentPhaseId = agent.activityLog.start("agent", `${phase}`, `${provider}/${mdl}`);
             const label = `${phase} (${provider}/${mdl})`;
             setThinkMsg(label);
             teamLines.push(label);
-            setStreamingText(teamLines.map((l) => `● ${l}`).join("\n") + "\n");
+            renderTeam();
           });
           if (currentPhaseId) agent.activityLog.finish(currentPhaseId);
+          agent.getTeam().setToolStatusCallback(() => {});
           setStreamingText("");
           setTurnCount((c) => c + 1);
           const teamElapsed = ((Date.now() - teamStart) / 1000);

@@ -167,12 +167,18 @@ export class TeamRunner {
     return agent.instance;
   }
 
+  private onToolStatus: ((status: string) => void) | null = null;
+
+  setToolStatusCallback(fn: (status: string) => void): void {
+    this.onToolStatus = fn;
+  }
+
   private async runPhase(role: AgentRole, prompt: string, onPhase: (p: string, prov: string, m: string) => void): Promise<PhaseResult> {
     const agent = this.agents.get(role)!;
     onPhase(ROLE_LABELS[role], agent.provider, agent.model);
     const start = Date.now();
     try {
-      const result = await this.getOrCreate(role).runTurn(`${ROLE_PROMPTS[role]}\n\n${prompt}`);
+      const result = await this.getOrCreate(role).runTurn(`${ROLE_PROMPTS[role]}\n\n${prompt}`, undefined, this.onToolStatus ?? undefined);
       const ms = Date.now() - start;
       await recordPerformance(agent.provider, role, ms, true).catch(() => {});
       return { role, provider: agent.provider, model: agent.model, text: result.text, ms };
