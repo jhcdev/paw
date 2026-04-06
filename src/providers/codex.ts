@@ -80,15 +80,20 @@ export class CodexProvider implements LlmProvider {
         const chunk = data.toString();
         stderr += chunk;
         if (onStatus) {
-          // Parse Codex stderr for meaningful activity info
+          // Parse Codex stderr for meaningful activity info — emit as tool: prefixed
           for (const line of chunk.split("\n")) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith("warning:") || trimmed.startsWith("Warning")) continue;
-            if (trimmed.includes("reading") || trimmed.includes("Reading")) { onStatus(`reading file...`); }
-            else if (trimmed.includes("writing") || trimmed.includes("Writing")) { onStatus(`writing file...`); }
-            else if (trimmed.includes("running") || trimmed.includes("Running") || trimmed.includes("exec")) { onStatus(`running command...`); }
-            else if (trimmed.includes("searching") || trimmed.includes("Searching")) { onStatus(`searching...`); }
-            else if (trimmed.includes("thinking") || trimmed.includes("Thinking")) { onStatus(`thinking...`); }
+            // Try to extract file path or command from the line
+            const pathMatch = trimmed.match(/(?:reading|read|Reading|Read)\s+(.+)/i);
+            const writeMatch = trimmed.match(/(?:writing|wrote|Writing|Wrote)\s+(.+)/i);
+            const cmdMatch = trimmed.match(/(?:running|ran|exec|Running|Ran)\s+[`"]?(.+?)[`"]?\s*$/i);
+            const searchMatch = trimmed.match(/(?:searching|search|grep|Searching)\s+(.+)/i);
+            if (pathMatch) { onStatus(`tool: Read(${pathMatch[1].trim().slice(0, 60)})`); }
+            else if (writeMatch) { onStatus(`tool: Write(${writeMatch[1].trim().slice(0, 60)})`); }
+            else if (cmdMatch) { onStatus(`tool: Bash(${cmdMatch[1].trim().slice(0, 60)})`); }
+            else if (searchMatch) { onStatus(`tool: Search(${searchMatch[1].trim().slice(0, 60)})`); }
+            else if (/thinking|Thinking/i.test(trimmed)) { onStatus(`thinking...`); }
           }
         }
       });
