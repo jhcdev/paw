@@ -2717,7 +2717,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
       {!activityView && turnCount > 0 ? (() => {
         const running = agent.activityLog.getRunning();
-        if (running.length === 0) return null;
+        const spawnTasks = spawnManager.getTasks().filter((t) => t.status === "running" || t.status === "queued");
+        if (running.length === 0 && spawnTasks.length === 0) return null;
         return (
           <Box flexDirection="column" paddingX={2}>
             {running.map((act) => (
@@ -2726,6 +2727,19 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                 <Text color="gray">{act.name}...</Text>
               </Box>
             ))}
+            {spawnTasks.map((t) => {
+              const elapsed = t.startedAt ? `${((Date.now() - t.startedAt) / 1000).toFixed(0)}s` : "";
+              const icon = t.status === "running" ? "◉" : "○";
+              const color = t.status === "running" ? "yellow" : "gray";
+              return (
+                <Box key={t.id} flexDirection="row">
+                  <Text color={color}>{`  ${icon} `}</Text>
+                  <Text color="gray">agent #{t.id} ({t.provider}/{t.model}){elapsed ? ` ${elapsed}` : ""}</Text>
+                  <Text color="#666"> — {t.goal.slice(0, 40)}</Text>
+                </Box>
+              );
+            })}
+            {spawnTasks.length > 0 ? <Text color="gray" italic>  /tasks for details</Text> : null}
           </Box>
         );
       })() : null}
