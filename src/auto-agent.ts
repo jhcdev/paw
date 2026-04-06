@@ -37,17 +37,26 @@ export type AutoResult = {
  */
 export class AutoAgent {
   private cwd: string;
-  private runTurn: (prompt: string) => Promise<{ text: string }>;
+  private runTurn: (prompt: string, onStatus?: (status: string) => void) => Promise<{ text: string }>;
   private onStep: (step: AutoStep) => void;
+  private onToolStatus: ((status: string) => void) | null = null;
 
   constructor(
     cwd: string,
-    runTurn: (prompt: string) => Promise<{ text: string }>,
+    runTurn: (prompt: string, onStatus?: (status: string) => void) => Promise<{ text: string }>,
     onStep: (step: AutoStep) => void,
   ) {
     this.cwd = cwd;
     this.runTurn = runTurn;
     this.onStep = onStep;
+  }
+
+  setToolStatusCallback(fn: (status: string) => void): void {
+    this.onToolStatus = fn;
+  }
+
+  private runTurn_(prompt: string): Promise<{ text: string }> {
+    return this.runTurn(prompt, this.onToolStatus ?? undefined);
   }
 
   async run(goal: string, maxIterations = 10): Promise<AutoResult> {
@@ -80,7 +89,7 @@ export class AutoAgent {
     this.onStep(planStep);
 
     const planStart = Date.now();
-    const planResult = await this.runTurn(
+    const planResult = await this.runTurn_(
       `You are an autonomous coding agent. You must complete this task fully.
 
 PROJECT CONTEXT:
@@ -115,7 +124,7 @@ Output ONLY the plan as numbered steps. Be specific and actionable.`
       this.onStep(execStep);
 
       const execStart = Date.now();
-      const execResult = await this.runTurn(
+      const execResult = await this.runTurn_(
         `Continue executing the plan. You are on iteration ${iteration}/${maxIterations}.
 
 Previous result:
@@ -183,7 +192,7 @@ If ALL steps are complete, say DONE.`
           this.onStep(fixStep);
 
           const fixStart = Date.now();
-          const fixResult = await this.runTurn(
+          const fixResult = await this.runTurn_(
             `The verification found errors. Fix them:
 
 ${verifyOutput}
@@ -211,7 +220,7 @@ Fix ALL errors. Use tools to edit files. Then say DONE when fixed.`
     steps.push(doneStep);
     this.onStep(doneStep);
 
-    const summaryResult = await this.runTurn(
+    const summaryResult = await this.runTurn_(
       `Summarize what was accomplished for the task: "${goal}"
 List: files created/modified, key changes, and any remaining work.
 Be concise (max 5 lines).`

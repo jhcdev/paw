@@ -1822,30 +1822,52 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setThinkMsg(`auto: ${route.reason}`);
           const autoLines: string[] = [];
           const autoStart = Date.now();
-          const auto = new AutoAgent(options.cwd, (p) => agent.runTurn(p), (step) => {
-            const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
-            const elapsed = step.ms ? ` (${(step.ms / 1000).toFixed(1)}s)` : "";
-            const label = `${icon} ${step.description}${elapsed}`;
-            setThinkMsg(label);
-            if (step.status === "running") {
-              autoLines.push(label);
-            } else {
-              // Update last line with final status
-              if (autoLines.length > 0) autoLines[autoLines.length - 1] = label;
-              // Show brief result for non-done steps
-              if (step.result && step.action !== "done") {
-                const brief = step.result.split("\n").slice(0, 2).map((l) => `  ⎿  ${l.slice(0, 80)}`).join("\n");
-                autoLines.push(brief);
+          const renderAutoLines = () => setStreamingText(autoLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n") + "\n");
+          const auto = new AutoAgent(
+            options.cwd,
+            (p, onStatus) => agent.runTurn(p, undefined, onStatus),
+            (step) => {
+              const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
+              const elapsed = step.ms ? ` (${(step.ms / 1000).toFixed(1)}s)` : "";
+              const label = `${icon} ${step.description}${elapsed}`;
+              setThinkMsg(label);
+              if (step.status === "running") {
+                autoLines.push(label);
+              } else {
+                // Update last step line with final status
+                for (let i = autoLines.length - 1; i >= 0; i--) {
+                  if (!autoLines[i].startsWith("  ")) { autoLines[i] = label; break; }
+                }
+                if (step.result && step.action !== "done") {
+                  const brief = step.result.split("\n").slice(0, 2).map((l) => `  ⎿  ${l.slice(0, 80)}`).join("\n");
+                  autoLines.push(brief);
+                }
               }
+              renderAutoLines();
+            },
+          );
+          auto.setToolStatusCallback((status) => {
+            if (status.startsWith("tool: ")) {
+              const label = status.slice(6);
+              const firstLine = label.split("\n")[0];
+              setThinkMsg(firstLine);
+              if (/\(\d+\.\d+s\)/.test(firstLine)) {
+                // Completed tool — update last nested tool line
+                for (let i = autoLines.length - 1; i >= 0; i--) {
+                  if (autoLines[i].startsWith("  ● ")) { autoLines[i] = `  ● ${label}`; break; }
+                }
+              } else {
+                autoLines.push(`  ● ${label}`);
+              }
+              renderAutoLines();
             }
-            setStreamingText(autoLines.map((l) => `● ${l}`).join("\n") + "\n");
           });
           const result = await auto.run(enrichedLine);
           setStreamingText("");
           setTurnCount((c) => c + 1);
           const totalElapsed = ((Date.now() - autoStart) / 1000);
           const cogLine = `✻ Cogitated for ${totalElapsed >= 60 ? `${Math.floor(totalElapsed / 60)}m ${Math.round(totalElapsed % 60)}s` : `${totalElapsed.toFixed(1)}s`}`;
-          const stepLog = autoLines.map((l) => `● ${l}`).join("\n");
+          const stepLog = autoLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
           const output = result.summary || result.steps.filter((s) => s.action === "done" && s.result).map((s) => s.result).join("\n");
           setEntries((c) => [...c, { role: "assistant", text: `${stepLog}\n\n${cogLine}\n\n${output}` }]);
         } else if (route.mode === "pipe") {
