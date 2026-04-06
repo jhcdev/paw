@@ -85,9 +85,10 @@ export function routeMessage(message: string, isTeamMode: boolean, hasMultiplePr
   }
 
   // 3. Check for auto patterns (large tasks)
-  // CJK characters carry more meaning per char, so lower threshold
+  // Only trigger auto for genuinely complex tasks — require longer prompts
+  // to avoid routing simple "작성해줘" or "create X" to slow autonomous mode
   const hasCJK = /[\u3000-\u9fff\uac00-\ud7af]/.test(trimmed);
-  const minLen = hasCJK ? 8 : 15;
+  const minLen = hasCJK ? 30 : 50;
   for (const pattern of AUTO_PATTERNS) {
     if (pattern.test(trimmed) && trimmed.length > minLen) {
       return { mode: "auto", reason: "Complex implementation task detected" };
