@@ -4,19 +4,39 @@ import { toolDefinitions, toolHandlers, createSafeHandlers } from "../tools.js";
 import type { AgentTurnResult, LlmProvider, ToolDefinition, ToolHandler, TokenUsage } from "../types.js";
 import type { SafetyConfig } from "../safety.js";
 
+function truncLine(s: string, n = 60): string {
+  const line = s.split("\n")[0].trim();
+  return line.length > n ? line.slice(0, n) + "…" : line;
+}
+
 function formatToolStatus(name: string, input: Record<string, unknown>): string {
   const p = (key: string) => typeof input[key] === "string" ? input[key] as string : "";
   switch (name) {
     case "read_file": return `tool: Read ${p("path")}`;
-    case "write_file": return `tool: Write ${p("path")}`;
+    case "write_file": {
+      const lines = p("content").split("\n").length;
+      return `tool: Write ${p("path")} (${lines} lines)`;
+    }
     case "edit_file": return `tool: Edit ${p("path")}`;
     case "list_files": return `tool: List ${p("path") || "."}`;
     case "search_text": return `tool: Search "${p("query")}"${p("path") ? ` in ${p("path")}` : ""}`;
-    case "run_shell": return `tool: Bash ${p("command").slice(0, 60)}`;
+    case "run_shell": return `tool: Bash ${truncLine(p("command"))}`;
     case "glob": return `tool: Glob ${p("pattern")}`;
-    case "web_fetch": return `tool: Fetch ${p("url").slice(0, 60)}`;
+    case "web_fetch": return `tool: Fetch ${truncLine(p("url"))}`;
     default: return `tool: ${name}`;
   }
+}
+
+function formatToolDiff(name: string, input: Record<string, unknown>): string | null {
+  const p = (key: string) => typeof input[key] === "string" ? input[key] as string : "";
+  if (name === "edit_file") {
+    const oldLines = p("old_string").split("\n").slice(0, 3).map((l) => `  - ${truncLine(l, 70)}`);
+    const newLines = p("new_string").split("\n").slice(0, 3).map((l) => `  + ${truncLine(l, 70)}`);
+    const oldExtra = p("old_string").split("\n").length > 3 ? `  - … (${p("old_string").split("\n").length} lines)` : "";
+    const newExtra = p("new_string").split("\n").length > 3 ? `  + … (${p("new_string").split("\n").length} lines)` : "";
+    return [...oldLines, ...(oldExtra ? [oldExtra] : []), ...newLines, ...(newExtra ? [newExtra] : [])].join("\n");
+  }
+  return null;
 }
 
 const SYSTEM_PROMPT = `You are Paw, a terminal coding assistant.\nWork step by step, prefer inspecting files before editing, and use tools when needed.\nKeep tool inputs minimal and precise.\nAssume the workspace root is the allowed boundary.`;
@@ -130,8 +150,13 @@ export class OpenAIProvider implements LlmProvider {
 
         for (const toolCall of toolCalls) {
           let toolLabel = `tool: ${toolCall.name}`;
-          try { toolLabel = formatToolStatus(toolCall.name, JSON.parse(toolCall.arguments as string) as Record<string, unknown>); } catch {}
-          if (onStatus) onStatus(toolLabel);
+          let toolDiff: string | null = null;
+          try {
+            const parsed = JSON.parse(toolCall.arguments as string) as Record<string, unknown>;
+            toolLabel = formatToolStatus(toolCall.name, parsed);
+            toolDiff = formatToolDiff(toolCall.name, parsed);
+          } catch {}
+          if (onStatus) onStatus(toolDiff ? `${toolLabel}\n${toolDiff}` : toolLabel);
           const toolStart = Date.now();
           const handler = allHandlers[toolCall.name];
           if (!handler) {
@@ -200,7 +225,8 @@ export class OpenAIProvider implements LlmProvider {
         try {
           const args = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
           const toolLabel = formatToolStatus(toolCall.function.name, args);
-          if (onStatus) onStatus(toolLabel);
+          const toolDiff = formatToolDiff(toolCall.function.name, args);
+          if (onStatus) onStatus(toolDiff ? `${toolLabel}\n${toolDiff}` : toolLabel);
           const toolStart = Date.now();
           if (this.toolHooks?.preTool) {
             const hookResult = await this.toolHooks.preTool(toolCall.function.name, args);

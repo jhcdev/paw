@@ -1883,13 +1883,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               });
             },
             (status) => {
-              setThinkMsg(status);
+              const firstLine = status.split("\n")[0];
+              setThinkMsg(firstLine);
               if (status.startsWith("tool: ")) {
-                const label = status.slice(6);
-                // Status with timing = completed tool; update last line
+                const full = status.slice(6);
+                const label = firstLine.slice(6);
+                // Status with timing = completed tool; update last entry
                 if (/\(\d+\.\d+s\)$/.test(label)) {
                   if (toolLines.length > 0) toolLines[toolLines.length - 1] = label;
-                  setStreamingText(toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n");
                 } else {
                   // New tool starting — deduplicate consecutive same tool
                   const key = label.replace(/\s+$/, "");
@@ -1899,11 +1900,13 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                     const count = match ? parseInt(match[1], 10) + 1 : 2;
                     toolLines[toolLines.length - 1] = `${key} ×${count}`;
                   } else {
-                    toolLines.push(label);
+                    // Include diff lines if present
+                    const diffPart = full.includes("\n") ? "\n" + full.split("\n").slice(1).join("\n") : "";
+                    toolLines.push(label + diffPart);
                   }
                   lastToolKey = key;
-                  setStreamingText(toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n");
                 }
+                setStreamingText(toolLines.map((t) => `  ⏺ ${t}`).join("\n") + "\n");
               } else if (/^(reading|writing|running|searching|thinking)\b/i.test(status)) {
                 const key = status;
                 if (key === lastToolKey && toolLines.length > 0) {
