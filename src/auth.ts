@@ -28,6 +28,7 @@ const PROVIDERS: { name: ProviderName; label: string; emoji: string; description
   { name: "anthropic", label: "Anthropic", emoji: "~", description: "Claude models (API key)", defaultModel: "claude-sonnet-4-20250514", needsKey: true },
   { name: "codex", label: "Codex", emoji: "~", description: "Codex CLI models (codex login)", defaultModel: "gpt-5.4", needsKey: false },
   { name: "ollama", label: "Ollama", emoji: "~", description: "Local models, no key needed", defaultModel: "qwen3", needsKey: false },
+  { name: "vllm", label: "vLLM", emoji: "~", description: "vLLM server (localhost:8000)", defaultModel: "", needsKey: false },
 ];
 
 function createRl(): readline.Interface {
@@ -173,6 +174,7 @@ export async function listSavedProviders(): Promise<void> {
 function resolveBaseUrl(provider: ProviderName): string | undefined {
   switch (provider) {
     case "ollama": return process.env.OLLAMA_BASE_URL?.trim() || "http://127.0.0.1:11434";
+    case "vllm": return process.env.VLLM_BASE_URL?.trim() || "http://localhost:8000";
     default: return undefined;
   }
 }

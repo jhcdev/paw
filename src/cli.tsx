@@ -43,6 +43,7 @@ const PROVIDER_LABELS: Record<ProviderName, string> = {
   anthropic: "Anthropic",
   codex: "Codex",
   ollama: "Ollama",
+  vllm: "vLLM",
 };
 
 const CAT_MOODS = [
@@ -70,6 +71,7 @@ const ALL_PROVIDERS: { name: ProviderName; label: string; hasLogin: boolean }[] 
   { name: "anthropic", label: "Anthropic", hasLogin: false },
   { name: "codex", label: "Codex (CLI)", hasLogin: false },
   { name: "ollama", label: "Ollama (local)", hasLogin: false },
+  { name: "vllm", label: "vLLM (local)", hasLogin: false },
 ];
 
 const COMMANDS: { name: string; desc: string }[] = [
@@ -102,7 +104,7 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/safety", desc: "configure safety guards" },
 ];
 
-const PROVIDER_NAMES = new Set(["anthropic", "codex", "ollama"]);
+const PROVIDER_NAMES = new Set(["anthropic", "codex", "ollama", "vllm"]);
 
 /** Parse "/spawn [provider[/model]] <goal>" into components */
 function parseSpawnArgs(raw: string): { provider?: ProviderName; model?: string; goal: string } {
@@ -708,7 +710,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const selected = ALL_PROVIDERS[settingsCursor]!;
           setSettingsProvider(selected.name);
           if (selected.hasLogin) { setSettingsPanel("auth-method"); setSettingsCursor(0); }
-          else if (selected.name === "ollama") { setSettingsPanel("off"); }
+          else if (selected.name === "ollama" || selected.name === "vllm") { setSettingsPanel("off"); }
           else { setSettingsPanel("add-key"); setInput(""); }
           return;
         }

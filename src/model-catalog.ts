@@ -48,6 +48,7 @@ const CATALOG: Record<ProviderName, ModelInfo[]> = {
     { id: "llama3.3:70b", name: "Llama 3.3 70B", tier: "strong", minPlan: "free" },
     { id: "codestral:latest", name: "Codestral", tier: "standard", minPlan: "free" },
   ],
+  vllm: [], // dynamically detected via /v1/models
 };
 
 const TIER_LABELS: Record<string, string> = {
@@ -57,6 +58,24 @@ const TIER_LABELS: Record<string, string> = {
 const PLAN_LABELS: Record<PlanLevel, string> = {
   free: "", pro: "pro", max: "max", team: "team", enterprise: "ent", api: "api",
 };
+
+/** Detect models served by a running vLLM server via GET /v1/models */
+async function detectVllmModels(baseUrl?: string): Promise<ModelInfo[]> {
+  try {
+    const url = (baseUrl?.trim() || "http://localhost:8000") + "/v1/models";
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return [];
+    const data = await res.json() as { data?: { id: string; max_model_len?: number }[] };
+    return (data.data ?? []).map((m) => ({
+      id: m.id,
+      name: m.id,
+      tier: "standard" as const,
+      minPlan: "free" as PlanLevel,
+    }));
+  } catch {
+    return [];
+  }
+}
 
 /** Detect locally pulled Ollama models */
 async function detectOllamaModels(): Promise<ModelInfo[]> {
@@ -88,6 +107,8 @@ export async function detectLiveModels(provider: ProviderName, apiKey: string, b
   switch (provider) {
     case "ollama":
       return detectOllamaModels();
+    case "vllm":
+      return detectVllmModels(baseUrl);
     default:
       return null;
   }
@@ -99,6 +120,7 @@ export async function detectPlan(provider: ProviderName): Promise<PlanLevel> {
     case "anthropic": return "api";
     case "codex": return "api";
     case "ollama":
+    case "vllm":
       return "free"; // Local = all models (all marked free)
     default:
       return "api";
@@ -131,7 +153,7 @@ export async function getAllFilteredModels(
     const keyInfo = providerKeys?.get(provider);
 
     // Try live detection for providers with API keys
-    if (keyInfo?.apiKey || provider === "ollama") {
+    if (keyInfo?.apiKey || provider === "ollama" || provider === "vllm") {
       const live = await detectLiveModels(provider, keyInfo?.apiKey ?? "", keyInfo?.baseUrl);
       if (live && live.length > 0) {
         results.push({ provider, plan, models: live });

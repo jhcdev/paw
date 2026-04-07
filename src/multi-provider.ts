@@ -163,6 +163,16 @@ export async function detectProviders(env: Record<string, string | undefined>): 
     });
   }
 
+  // vLLM (optional API key, configurable host)
+  if (env.VLLM_MODEL?.trim() || env.VLLM_BASE_URL?.trim()) {
+    found.push({
+      provider: "vllm",
+      apiKey: env.VLLM_API_KEY?.trim() || "dummy",
+      model: env.VLLM_MODEL?.trim() || "auto",
+      baseUrl: env.VLLM_BASE_URL?.trim() || "http://localhost:8000",
+    });
+  }
+
   return found;
 }
 

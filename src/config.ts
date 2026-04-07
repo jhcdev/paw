@@ -5,7 +5,7 @@ import type { ProviderName } from "./types.js";
 
 loadEnv({ quiet: true });
 
-const providerSchema = z.enum(["anthropic", "codex", "ollama"]);
+const providerSchema = z.enum(["anthropic", "codex", "ollama", "vllm"]);
 
 const envSchema = z.object({
   LLM_PROVIDER: providerSchema.default("ollama"),
@@ -13,6 +13,9 @@ const envSchema = z.object({
   ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-4-20250514"),
   OLLAMA_BASE_URL: z.string().min(1).default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().min(1).default("qwen3"),
+  VLLM_BASE_URL: z.string().min(1).default("http://localhost:8000"),
+  VLLM_MODEL: z.string().min(1).default(""),
+  VLLM_API_KEY: z.string().optional(),
 });
 
 export type AppConfig = {
@@ -63,6 +66,14 @@ export function loadConfig(overrides?: Partial<Pick<AppConfig, "provider" | "mod
         apiKey: "",
         model: overrides?.model ?? parsed.data.OLLAMA_MODEL,
         baseUrl: parsed.data.OLLAMA_BASE_URL,
+      };
+    }
+    case "vllm": {
+      return {
+        provider,
+        apiKey: parsed.data.VLLM_API_KEY?.trim() || "dummy",
+        model: overrides?.model ?? (parsed.data.VLLM_MODEL || "auto"),
+        baseUrl: parsed.data.VLLM_BASE_URL,
       };
     }
     default: {

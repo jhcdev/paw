@@ -21,6 +21,12 @@ export function createProvider(args: {
         apiKey: "ollama",
         baseUrl: `${args.baseUrl ?? "http://127.0.0.1:11434"}/v1`,
       });
+    case "vllm":
+      return new OpenAIProvider({
+        ...args,
+        apiKey: args.apiKey || "dummy",
+        baseUrl: `${args.baseUrl ?? "http://localhost:8000"}/v1`,
+      });
     default:
       throw new Error(`Unsupported provider: ${args.provider}`);
   }
