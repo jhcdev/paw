@@ -24,19 +24,20 @@ type ParsedArgs = {
   sessionId?: string;
 };
 
-const VALID_PROVIDERS = new Set<string>(["anthropic", "codex", "ollama"]);
+const VALID_PROVIDERS = new Set<string>(["anthropic", "codex", "ollama", "vllm"]);
 
 function printHelp(): void {
   process.stdout.write(`${pc.bold(pc.cyan("Paw"))} — Multi-provider terminal coding assistant\n\n`);
   process.stdout.write(`Usage:\n`);
   process.stdout.write(`  npm start                          Interactive login + REPL\n`);
   process.stdout.write(`  npm start -- "summarize this"      One-shot prompt\n`);
-  process.stdout.write(`  npm start -- --provider ollama     Skip provider menu\n\n`);
+  process.stdout.write(`  npm start -- --provider ollama     Skip provider menu\n`);
+  process.stdout.write(`  npm start -- --provider vllm       Connect to local/OpenAI-compatible vLLM\n\n`);
   process.stdout.write(`Flags:\n`);
   process.stdout.write(`  --help              Show this help\n`);
   process.stdout.write(`  --tools             List available tools\n`);
   process.stdout.write(`  --cwd <dir>         Set workspace root\n`);
-  process.stdout.write(`  --provider <name>   anthropic, codex, ollama\n`);
+  process.stdout.write(`  --provider <name>   anthropic, codex, ollama, vllm\n`);
   process.stdout.write(`  --model <id>        Override model for the session\n`);
   process.stdout.write(`  --list              Show saved credentials\n`);
   process.stdout.write(`  --logout [provider] Remove saved credentials\n`);
@@ -131,8 +132,21 @@ async function main(): Promise<void> {
     const found = detected.find((d) => d.provider === args.provider);
     if (found) {
       auth = { provider: found.provider, apiKey: found.apiKey, model: args.model ?? found.model, baseUrl: found.baseUrl };
-    } else if (args.provider === "codex" || args.provider === "ollama" || args.provider === "anthropic") {
-      auth = { provider: args.provider, apiKey: "", model: args.model ?? (args.provider === "codex" ? "gpt-5.4" : args.provider === "anthropic" ? "claude-sonnet-4-20250514" : "qwen3") };
+    } else if (args.provider === "codex" || args.provider === "ollama" || args.provider === "anthropic" || args.provider === "vllm") {
+      auth = {
+        provider: args.provider,
+        apiKey: args.provider === "vllm" ? "dummy" : "",
+        model: args.model ?? (
+          args.provider === "codex"
+            ? "gpt-5.4"
+            : args.provider === "anthropic"
+              ? "claude-sonnet-4-20250514"
+              : args.provider === "vllm"
+                ? "auto"
+                : "qwen3"
+        ),
+        ...(args.provider === "vllm" ? { baseUrl: process.env.VLLM_BASE_URL?.trim() || "http://localhost:8000" } : {}),
+      };
     } else {
       throw new Error(`No credentials found for ${args.provider}. Run 'paw' interactively to set up.`);
     }
@@ -147,8 +161,8 @@ async function main(): Promise<void> {
     detectedForAgent = detected;
 
     if (detected.length > 0) {
-      // Pick best available: codex > ollama
-      const priority: ProviderName[] = ["anthropic", "codex", "ollama"];
+      // Pick best available: anthropic > codex > ollama > vllm
+      const priority: ProviderName[] = ["anthropic", "codex", "ollama", "vllm"];
       const best = priority.find((p) => detected.some((d) => d.provider === p));
       const chosen = detected.find((d) => d.provider === best) ?? detected[0]!;
       auth = { provider: chosen.provider, apiKey: chosen.apiKey, model: chosen.model, baseUrl: chosen.baseUrl };

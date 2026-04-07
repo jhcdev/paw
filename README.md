@@ -6,10 +6,10 @@
   > ^ <
 ```
 
-**The multi-provider AI coding agent for the terminal.** Use Anthropic, OpenAI Codex, and Ollama simultaneously — with automatic fallback, parallel sub-agents, cross-provider verification, and built-in safety. Not tied to one model, not tied to one provider. Switch with `/model` — no code changes, no lock-in.
+**The multi-provider AI coding agent for the terminal.** Use Anthropic, OpenAI Codex, Ollama, and vLLM/OpenAI-compatible endpoints — with automatic fallback, parallel sub-agents, cross-provider verification, and built-in safety. Not tied to one model, not tied to one provider. Switch with `/model` — no code changes, no lock-in.
 
 <table>
-<tr><td><b>Multi-provider, zero lock-in</b></td><td>Anthropic (Claude), Codex (ChatGPT subscription), and Ollama (local/free) — all active at once. Rate limit on Claude? Auto-switches to Codex. Need free local inference? Ollama is always there. No manual intervention.</td></tr>
+<tr><td><b>Multi-provider, zero lock-in</b></td><td>Anthropic (Claude), Codex (ChatGPT subscription), Ollama (local/free), and vLLM/OpenAI-compatible endpoints — all available behind one CLI. Rate limit on Claude? Auto-switches to Codex. Need self-hosted inference? Point Paw at your vLLM server.</td></tr>
 <tr><td><b>Parallel sub-agents</b></td><td>Spawn independent agents that work in background while you keep chatting. Each spawned agent inherits your current model and session context. Round-robin across providers or pin to a specific one.</td></tr>
 <tr><td><b>Cross-provider verification</b></td><td>AI writes code → a <i>different</i> AI reviews it automatically. Paw also runs local checks (typecheck/build/test/lint when available), summarizes blockers inline, and keeps browsable verification logs across sessions.</td></tr>
 <tr><td><b>Agent safety</b></td><td>Every tool call is risk-classified in real-time. Destructive commands (rm -rf, mkfs, curl|sh) are blocked before they execute. High-risk operations auto-checkpoint via git stash.</td></tr>
@@ -32,7 +32,7 @@ npm install
 npm link
 ```
 
-Works on Linux, macOS, and WSL2. Requires Node.js 22+ and at least one provider (Anthropic API key, Codex CLI, or Ollama).
+Works on Linux, macOS, and WSL2. Requires Node.js 22+ and at least one provider (Anthropic API key, Codex CLI, Ollama, or vLLM).
 
 After installation:
 
@@ -41,6 +41,7 @@ paw                                    # Auto-detect providers and start
 paw "explain this project"             # Direct prompt
 paw --continue                         # Resume last session
 paw --provider codex                   # Force specific provider
+paw --provider vllm                    # Use your vLLM/OpenAI-compatible server
 ```
 
 ---
@@ -50,6 +51,7 @@ paw --provider codex                   # Force specific provider
 ```bash
 paw                          # Interactive REPL — start coding
 paw --provider ollama        # Force a specific provider
+paw --provider vllm          # Force vLLM
 paw --continue               # Resume last session
 paw --session abc123         # Join specific session
 paw --help                   # All flags and MCP commands
@@ -66,6 +68,7 @@ paw --logout                 # Remove saved credentials
 | **Anthropic** | `ANTHROPIC_API_KEY` | Haiku 4.5, Sonnet 4/4.6, Opus 4/4.6 | Per-token |
 | **Codex** | `codex login` | GPT-5.4, GPT-5.3, o4 Mini, o3 | ChatGPT subscription |
 | **Ollama** | (none) | Any pulled model | Free (local) |
+| **vLLM** | `VLLM_API_KEY` optional | Any model exposed via `/v1/models` | Self-hosted |
 
 ```bash
 # Anthropic — set in .env or configure via /settings
@@ -76,6 +79,12 @@ npm install -g @openai/codex && codex login
 
 # Ollama — pull a model and go
 ollama pull qwen3
+
+# vLLM — point Paw at your OpenAI-compatible endpoint
+VLLM_BASE_URL=http://localhost:8000
+VLLM_MODEL=auto
+# optional
+VLLM_API_KEY=dummy
 ```
 
 **Coming soon:** Gemini, Groq, OpenRouter.
