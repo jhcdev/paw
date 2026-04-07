@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Verifier } from "./verify.js";
 import type { ProviderName } from "./types.js";
 
@@ -244,6 +247,87 @@ END`;
       expect(prompt).toContain("const x = 2;");
       expect(prompt).toContain("Before:");
       expect(prompt).toContain("After:");
+    });
+
+    it("includes local verification checks in the review prompt", async () => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "paw-verify-"));
+      await fs.writeFile(path.join(cwd, "package.json"), JSON.stringify({
+        name: "verify-checks",
+        scripts: {
+          check: "node -e \"console.log('types ok')\"",
+        },
+      }));
+
+      const multi = createMockMulti("VERDICT: PASS\nCONFIDENCE: 90\nISSUES:\nEND");
+      const verifier = new Verifier(multi as any, "anthropic", cwd);
+      verifier.trackChange("src/foo.ts", "write", undefined, "const x = 1;");
+
+      await verifier.verify();
+
+      const prompt = multi.ask.mock.calls[0]![1] as string;
+      expect(prompt).toContain("Verification checks:");
+      expect(prompt).toContain("PASS check: npm run --silent check");
+      expect(prompt).toContain("types ok");
+
+      await fs.rm(cwd, { recursive: true, force: true });
+    });
+
+    it("blocks verification when a local project check fails", async () => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "paw-verify-fail-"));
+      await fs.writeFile(path.join(cwd, "package.json"), JSON.stringify({
+        name: "verify-fail",
+        scripts: {
+          test: "node -e \"console.error('tests failed'); process.exit(1)\"",
+        },
+      }));
+
+      const multi = createMockMulti("VERDICT: PASS\nCONFIDENCE: 95\nISSUES:\nEND");
+      const verifier = new Verifier(multi as any, "anthropic", cwd);
+      verifier.trackChange("src/foo.ts", "write", undefined, "const x = 1;");
+
+      const result = await verifier.verify();
+
+      expect(result.verified).toBe(false);
+      expect(result.verdict).toBe("block");
+      expect(result.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "test", ok: false, source: "script" }),
+      ]));
+      expect(result.issues).toEqual(expect.arrayContaining([
+        expect.objectContaining({ severity: "error", file: "[check:test]" }),
+      ]));
+      expect(result.blockingSummary).toEqual(expect.arrayContaining([
+        expect.stringContaining("test:"),
+      ]));
+
+      await fs.rm(cwd, { recursive: true, force: true });
+    });
+
+    it("auto-detects a fallback typecheck when no check script exists", async () => {
+      const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "paw-verify-fallback-"));
+      await fs.mkdir(path.join(cwd, "node_modules", ".bin"), { recursive: true });
+      await fs.writeFile(path.join(cwd, "package.json"), JSON.stringify({ name: "verify-fallback", scripts: {} }));
+      await fs.writeFile(path.join(cwd, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2022" } }));
+      const fakeTsc = path.join(cwd, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc");
+      await fs.writeFile(
+        fakeTsc,
+        process.platform === "win32"
+          ? "@echo off\r\necho fallback typecheck ok\r\n"
+          : "#!/bin/sh\necho fallback typecheck ok\n",
+        { mode: 0o755 },
+      );
+
+      const multi = createMockMulti("VERDICT: PASS\nCONFIDENCE: 93\nISSUES:\nEND");
+      const verifier = new Verifier(multi as any, "anthropic", cwd);
+      verifier.trackChange("src/foo.ts", "write", undefined, "const x = 1;");
+
+      const result = await verifier.verify();
+
+      expect(result.checks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "check", ok: true, source: "fallback" }),
+      ]));
+      expect(result.verified).toBe(true);
+
+      await fs.rm(cwd, { recursive: true, force: true });
     });
   });
 });

@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
+import type { VerifyHistoryEntry } from "./agent.js";
 
 const SESSIONS_DIR = path.join(os.homedir(), ".paw", "sessions");
 
@@ -21,6 +22,7 @@ export type SessionData = {
   updatedAt: string;
   entries: SessionEntry[];
   inputHistory?: string[];
+  verifyHistory?: VerifyHistoryEntry[];
   writerId?: string;
 };
 

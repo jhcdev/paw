@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import { Box, Newline, render, Text, useApp, useInput } from "ink";
 
-import type { CodingAgent } from "./agent.js";
+import type { CodingAgent, VerifyHistoryEntry } from "./agent.js";
 import { appendToSession, saveSession, listSessions, watchSession, type SessionData, type SessionEntry } from "./session.js";
 import { formatActivityForHistory } from "./activity-log.js";
 import { toolDefinitions } from "./tools.js";
@@ -23,6 +23,7 @@ import { loadMemory, appendMemory, formatMemoryInfo } from "./memory.js";
 import { cursorManager } from "./cursor-manager.js";
 import { Cursor, pushToKillRing, getLastKill, resetKillAccumulation } from "./cursor.js";
 import { countLinesBelowInput, measureImeColumn } from "./ime-cursor.js";
+import type { VerifyResult } from "./verify.js";
 
 const execAsync = promisify(exec);
 
@@ -38,6 +39,18 @@ type ChatEntry = {
   role: "system" | "user" | "assistant";
   text: string;
 };
+
+type VerifyLogItem = {
+  id: string;
+  label: string;
+  lines: string[];
+};
+
+function formatVerifyHistoryLabel(entry: VerifyHistoryEntry): string {
+  const status = entry.result.verdict === "block" ? "BLOCKED" : entry.result.verdict === "warn" ? "WARN" : "PASS";
+  const time = new Date(entry.timestamp).toISOString().slice(11, 19);
+  return `${status} — ${entry.result.provider} — ${time}`;
+}
 
 const PROVIDER_LABELS: Record<ProviderName, string> = {
   anthropic: "Anthropic",
@@ -65,6 +78,70 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+function buildVerifyLogItems(result: VerifyResult | null): VerifyLogItem[] {
+  if (!result) return [];
+
+  const status = result.verdict === "block" ? "BLOCKED" : result.verdict === "warn" ? "WARN" : "PASS";
+  const items: VerifyLogItem[] = [
+    {
+      id: "overview",
+      label: `Overview — ${status} (${result.provider})`,
+      lines: [
+        "Verification Overview",
+        "=====================",
+        `Status: ${status}`,
+        `Provider: ${result.provider}`,
+        `Confidence: ${result.confidence}/100`,
+        `Elapsed: ${(result.ms / 1000).toFixed(1)}s`,
+        "",
+        "Blocking summary:",
+        ...(result.blockingSummary.length > 0 ? result.blockingSummary.map((line) => `- ${line}`) : ["(none)"]),
+        "",
+        "Issues:",
+        ...(result.issues.length > 0
+          ? result.issues.map((issue) => `[${issue.severity}] ${issue.file}: ${issue.description}`)
+          : ["(none)"]),
+      ],
+    },
+  ];
+
+  result.checks.forEach((check, index) => {
+    items.push({
+      id: `check:${index}`,
+      label: `${check.ok ? "✓" : "✗"} ${check.name} — ${check.source === "fallback" ? "auto" : "script"}`,
+      lines: [
+        `Check: ${check.name}`,
+        "=====================",
+        `Status: ${check.ok ? "PASS" : "FAIL"}`,
+        `Source: ${check.source}`,
+        `Command: ${check.command}`,
+        `Summary: ${check.summary}`,
+        "",
+        "Full log:",
+        ...check.fullOutput.split("\n"),
+      ],
+    });
+  });
+
+  if (result.issues.length > 0) {
+    items.push({
+      id: "issues",
+      label: `Issues (${result.issues.length})`,
+      lines: [
+        "Verification Issues",
+        "===================",
+        ...result.issues.flatMap((issue, index) => [
+          `${index + 1}. [${issue.severity}] ${issue.file}`,
+          `   ${issue.description}`,
+          "",
+        ]),
+      ],
+    });
+  }
+
+  return items;
 }
 
 const ALL_PROVIDERS: { name: ProviderName; label: string; hasLogin: boolean }[] = [
@@ -100,7 +177,8 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/pipe", desc: "feed shell output to AI" },
   { name: "/spawn", desc: "spawn a parallel sub-agent (↑↓ or /spawn <task>)" },
   { name: "/tasks", desc: "list spawned agent tasks" },
-  { name: "/verify", desc: "toggle auto-verify or set provider (/verify ollama)" },
+  { name: "/verify", desc: "auto-verify settings and reviewer selection" },
+  { name: "/verify logs", desc: "browse the last full verification logs" },
   { name: "/safety", desc: "configure safety guards" },
 ];
 
@@ -128,6 +206,7 @@ function parseSpawnArgs(raw: string): { provider?: ProviderName; model?: string;
 function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions }) {
   const { exit } = useApp();
   const [sessionId] = useState(options.sessionId);
+  const [sessionCreatedAt] = useState(() => options.existingSession?.createdAt ?? new Date().toISOString());
   const [entries, setEntries] = useState<ChatEntry[]>(() => {
     if (options.existingSession?.entries.length) {
       return options.existingSession.entries.map((e) => ({ role: e.role, text: e.text }));
@@ -175,6 +254,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [activityScroll, setActivityScroll] = useState(0);
   const [statusPanel, setStatusPanel] = useState(false);
   const [verifyPanel, setVerifyPanel] = useState<"off" | "menu" | "providers" | "models" | "effort">("off");
+  const [verifyLogView, setVerifyLogView] = useState<"history" | "sections" | "detail" | null>(null);
+  const [verifyLogRunIndex, setVerifyLogRunIndex] = useState(0);
+  const [verifyLogSectionId, setVerifyLogSectionId] = useState<string | null>(null);
+  const [verifyLogCursor, setVerifyLogCursor] = useState(0);
+  const [verifyLogScroll, setVerifyLogScroll] = useState(0);
   const [spawnPanel, setSpawnPanel] = useState<"off" | "providers" | "models" | "task">("off");
   const [spawnPanelProvider, setSpawnPanelProvider] = useState<string>("");
   const [spawnPanelModel, setSpawnPanelModel] = useState<string>("");
@@ -232,12 +316,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
   // Watch session file for changes from other terminals
   React.useEffect(() => {
+    agent.setVerifyHistory(options.existingSession?.verifyHistory ?? []);
+  }, [agent, options.existingSession]);
+
+  React.useEffect(() => {
     const unwatch = watchSession(sessionId, (data) => {
       if (data.writerId === writerId) return; // ignore our own writes
+      agent.setVerifyHistory(data.verifyHistory ?? []);
       setEntries(data.entries.map((e) => ({ role: e.role, text: e.text })));
     });
     return unwatch;
-  }, [sessionId, writerId]);
+  }, [agent, sessionId, writerId]);
 
   // Listen for activity log changes
   React.useEffect(() => {
@@ -289,16 +378,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         model: agent.getActiveModel(),
         mode,
         cwd: options.cwd,
-        createdAt: new Date().toISOString(),
+        createdAt: sessionCreatedAt,
         updatedAt: new Date().toISOString(),
         entries: entries.map((e) => ({ role: e.role, text: e.text, timestamp: new Date().toISOString() })),
         inputHistory: inputHistoryRef.current,
+        verifyHistory: agent.getVerifyHistory(),
         writerId,
       };
       saveSession(data).catch(() => {});
     }, 1000);
     return () => clearTimeout(timeout);
-  }, [entries, sessionId]);
+  }, [agent, entries, mode, options.cwd, sessionCreatedAt, sessionId, writerId]);
 
   const suggestions = useMemo(() => {
     if (!input.startsWith("/") || input.includes(" ")) return [];
@@ -392,7 +482,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // ↑↓ = input history navigation (when no panels/suggestions active)
-    const noPanel = suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off" && !activityView;
+    const noPanel = suggestions.length === 0 && !statusPanel && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && !verifyLogView && spawnPanel === "off" && !activityView;
     if ((key.upArrow || key.downArrow) && noPanel) {
       const hist = inputHistoryRef.current;
       if (hist.length === 0) return;
@@ -470,6 +560,55 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         const maxScroll = Math.max(0, act.logs.length - 5);
         if (key.downArrow) { setActivityScroll((s) => Math.min(s + 1, maxScroll)); return; }
         if (key.upArrow) { setActivityScroll((s) => Math.max(s - 1, 0)); return; }
+      }
+      return;
+    }
+
+    // Verify log selector/detail viewer
+    if (verifyLogView) {
+      const verifyHistory = agent.getVerifyHistory();
+      const selectedRun = verifyHistory[verifyLogRunIndex] ?? null;
+      const verifyLogItems = buildVerifyLogItems(selectedRun?.result ?? null);
+
+      if (verifyLogView === "history") {
+        if (key.escape) { setVerifyLogView(null); setVerifyLogCursor(0); return; }
+        if (key.downArrow) { setVerifyLogCursor((i) => Math.min(i + 1, verifyHistory.length - 1)); return; }
+        if (key.upArrow) { setVerifyLogCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          const selected = verifyHistory[verifyLogCursor];
+          if (selected) {
+            setVerifyLogRunIndex(verifyLogCursor);
+            setVerifyLogView("sections");
+            setVerifyLogCursor(0);
+            setVerifyLogScroll(0);
+          }
+          return;
+        }
+        return;
+      }
+
+      if (verifyLogView === "sections") {
+        if (key.escape) { setVerifyLogView("history"); setVerifyLogCursor(verifyLogRunIndex); return; }
+        if (key.downArrow) { setVerifyLogCursor((i) => Math.min(i + 1, verifyLogItems.length - 1)); return; }
+        if (key.upArrow) { setVerifyLogCursor((i) => Math.max(i - 1, 0)); return; }
+        if (key.return) {
+          const selected = verifyLogItems[verifyLogCursor];
+          if (selected) {
+            setVerifyLogSectionId(selected.id);
+            setVerifyLogView("detail");
+            setVerifyLogScroll(0);
+          }
+          return;
+        }
+        return;
+      }
+
+      if (key.escape) { setVerifyLogView("sections"); setVerifyLogSectionId(null); setVerifyLogScroll(0); return; }
+      const selected = verifyLogItems.find((item) => item.id === verifyLogSectionId);
+      if (selected && selectedRun) {
+        const maxScroll = Math.max(0, selected.lines.length - 14);
+        if (key.downArrow) { setVerifyLogScroll((s) => Math.min(s + 1, maxScroll)); return; }
+        if (key.upArrow) { setVerifyLogScroll((s) => Math.max(s - 1, 0)); return; }
       }
       return;
     }
@@ -610,7 +749,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     // Verify panel
     if (verifyPanel !== "off") {
       if (verifyPanel === "menu") {
-        const menuItems = ["Toggle ON/OFF", "Select reviewer provider", "Auto (use different provider)"];
+        const menuItems = ["Toggle ON/OFF", "Select reviewer provider", "Auto (use different provider)", "Browse last full logs"];
         if (key.escape) { setVerifyPanel("off"); return; }
         if (key.downArrow) { setVerifyCursor((i) => Math.min(i + 1, menuItems.length - 1)); return; }
         if (key.upArrow) { setVerifyCursor((i) => Math.max(i - 1, 0)); return; }
@@ -626,11 +765,23 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           } else if (verifyCursor === 1) {
             setVerifyPanel("providers");
             setVerifyCursor(0);
-          } else {
+          } else if (verifyCursor === 2) {
             agent.setVerifyProvider(null);
             agent.enableVerify(true);
             setEntries((c) => [...c, { role: "system", text: "Auto-verify: ON (reviewer: auto)" }]);
             setVerifyPanel("off");
+          } else {
+            if (agent.getVerifyHistory().length === 0) {
+              setEntries((c) => [...c, { role: "system", text: "No verification log yet. Run a verified change first." }]);
+              setVerifyPanel("off");
+            } else {
+              setVerifyPanel("off");
+              setVerifyLogView("history");
+              setVerifyLogRunIndex(0);
+              setVerifyLogSectionId(null);
+              setVerifyLogCursor(0);
+              setVerifyLogScroll(0);
+            }
           }
           return;
         }
@@ -856,7 +1007,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       exit();
     }
 
-    if (suggestions.length > 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off") {
+    if (suggestions.length > 0 && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && !verifyLogView && spawnPanel === "off") {
       if (key.downArrow) {
         setSelectedIdx((i) => Math.min(i + 1, suggestions.length - 1));
         return;
@@ -884,7 +1035,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // Enter to submit (inputRef synced synchronously — IME double-fire sees empty ref and exits)
-    if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && spawnPanel === "off") {
+    if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && !verifyLogView && spawnPanel === "off") {
       const value = inputRef.current;
       if (!value.trim()) return;
       inputHistoryRef.current.push(value);
@@ -1200,6 +1351,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /pipe fix <cmd> - run, fix errors, repeat until pass",
             "  /spawn <task> - spawn parallel sub-agent",
             "  /tasks       - list spawned tasks (/tasks results, /tasks clear)",
+            "  /verify      - auto-verify settings",
+            "  /verify logs - browse full verification logs",
             "  /clear     - reset chat",
             "  /exit      - quit",
           ].join("\n") },
@@ -1765,10 +1918,26 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           return;
         }
       // ── verify ──
-      if (line === "/verify") {
-        setVerifyPanel("menu");
-        setVerifyCursor(0);
-        return;
+      if (line === "/verify" || line.startsWith("/verify ")) {
+        const arg = line.slice("/verify".length).trim();
+        if (!arg) {
+          setVerifyPanel("menu");
+          setVerifyCursor(0);
+          return;
+        }
+        if (arg === "logs" || arg === "log") {
+          if (agent.getVerifyHistory().length === 0) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No verification log yet. Run a verified change first." }]);
+          } else {
+            setEntries((c) => [...c, { role: "user", text: line }]);
+            setVerifyLogView("history");
+            setVerifyLogRunIndex(0);
+            setVerifyLogSectionId(null);
+            setVerifyLogCursor(0);
+            setVerifyLogScroll(0);
+          }
+          return;
+        }
       }
 
       // ── safety ──
@@ -2262,7 +2431,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
           {verifyPanel === "menu" ? (
             <Box flexDirection="column" marginTop={1}>
-              {["Toggle ON/OFF", "Select reviewer provider", "Auto (use different provider)"].map((item, i) => (
+              {["Toggle ON/OFF", "Select reviewer provider", "Auto (use different provider)", "Browse last full logs"].map((item, i) => (
                 <Box key={item}>
                   <Text color={i === verifyCursor ? "#ff9c73" : "gray"} bold={i === verifyCursor}>
                     {i === verifyCursor ? " > " : "   "}
@@ -2324,6 +2493,77 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           ) : null}
         </Box>
       ) : null}
+
+      {verifyLogView ? (() => {
+        const verifyHistory = agent.getVerifyHistory();
+        const selectedRun = verifyHistory[verifyLogRunIndex] ?? null;
+        const verifyLogItems = buildVerifyLogItems(selectedRun?.result ?? null);
+
+        if (verifyLogView === "history") {
+          return (
+            <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+              <Text color="#ff9c73" bold>Verification History</Text>
+              <Text color="gray">Select a verification run, then browse its sections.</Text>
+              <Box flexDirection="column" marginTop={1}>
+                {verifyHistory.length === 0 ? (
+                  <Text color="gray">(no verification log yet)</Text>
+                ) : verifyHistory.map((entry, i) => (
+                  <Box key={entry.id}>
+                    <Text color={i === verifyLogCursor ? "#ff9c73" : "gray"} bold={i === verifyLogCursor}>
+                      {i === verifyLogCursor ? " > " : "   "}
+                    </Text>
+                    <Text color={i === verifyLogCursor ? "#ff9c73" : "gray"}>{formatVerifyHistoryLabel(entry)}</Text>
+                  </Box>
+                ))}
+              </Box>
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter select  Esc close"}</Text>
+            </Box>
+          );
+        }
+
+        if (verifyLogView === "sections") {
+          return (
+            <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>
+              <Text color="#ff9c73" bold>Verification Logs</Text>
+              <Text color="gray">
+                Run: <Text bold color="white">{selectedRun ? formatVerifyHistoryLabel(selectedRun) : "(missing)"}</Text>
+              </Text>
+              <Box flexDirection="column" marginTop={1}>
+                {verifyLogItems.map((item, i) => (
+                  <Box key={item.id}>
+                    <Text color={i === verifyLogCursor ? "#ff9c73" : "gray"} bold={i === verifyLogCursor}>
+                      {i === verifyLogCursor ? " > " : "   "}
+                    </Text>
+                    <Text color={i === verifyLogCursor ? "#ff9c73" : "gray"}>{item.label}</Text>
+                  </Box>
+                ))}
+              </Box>
+              <Text color="gray" italic>{"\n  ↑↓ navigate  Enter open  Esc back"}</Text>
+            </Box>
+          );
+        }
+
+        const selected = verifyLogItems.find((item) => item.id === verifyLogSectionId);
+        if (!selected) return null;
+        const visibleLines = selected.lines.slice(verifyLogScroll, verifyLogScroll + 14);
+        return (
+          <Box flexDirection="column" borderStyle="round" borderColor="#553322" paddingX={2} paddingY={1} marginBottom={1}>
+            <Text color="#ff9c73" bold>{selected.label}</Text>
+            <Text color="gray">
+              Notepad view — <Text bold color="white">{selectedRun ? formatVerifyHistoryLabel(selectedRun) : "verification detail"}</Text>
+            </Text>
+            <Box flexDirection="column" marginTop={1}>
+              {visibleLines.map((line, index) => (
+                <Text key={`${selected.id}-${verifyLogScroll + index}`} color="gray">{line}</Text>
+              ))}
+            </Box>
+            {selected.lines.length > 14 ? (
+              <Text color="gray" italic>{`  ${verifyLogScroll + 1}-${Math.min(verifyLogScroll + 14, selected.lines.length)} of ${selected.lines.length} | ↑↓ scroll`}</Text>
+            ) : null}
+            <Text color="gray" italic>  Esc back</Text>
+          </Box>
+        );
+      })() : null}
 
       {settingsPanel !== "off" ? (
         <Box flexDirection="column" borderStyle="round" borderColor="#d97757" paddingX={2} paddingY={1} marginBottom={1}>

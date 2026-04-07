@@ -1,3 +1,5 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
 import { McpManager, type McpServerEntry } from "./mcp.js";
 import { UsageTracker } from "./usage-tracker.js";
 import { ActivityLog } from "./activity-log.js";
@@ -5,11 +7,17 @@ import { MultiProvider, detectProviders } from "./multi-provider.js";
 import { TeamRunner, autoConfigureTeam } from "./team.js";
 import { createProvider } from "./providers/index.js";
 import { HookManager } from "./hooks.js";
-import { Verifier } from "./verify.js";
+import { Verifier, type VerifyResult } from "./verify.js";
 import { loadMemory } from "./memory.js";
 import { shouldCompact, buildCompactionPrompt, buildCompactedMessages, type CompactionMessage } from "./compaction.js";
 import type { AgentTurnResult, LlmProvider, ProviderName, ToolDefinition, ToolHandler, TokenUsage, UserPromptCallback } from "./types.js";
 import type { SafetyConfig } from "./safety.js";
+
+export type VerifyHistoryEntry = {
+  id: string;
+  timestamp: string;
+  result: VerifyResult;
+};
 
 export class CodingAgent {
   private provider: LlmProvider;
@@ -29,6 +37,10 @@ export class CodingAgent {
   private safetyConfig: SafetyConfig = { enabled: true, autoCheckpoint: true, blockCritical: true };
   private currentActivityId: string | null = null;
   private userPromptFn: UserPromptCallback | null = null;
+  private pendingVerifyChanges: { toolName: "write_file" | "edit_file"; path: string; oldContent?: string }[] = [];
+  private lastVerifyResult: VerifyResult | null = null;
+  private verifyHistory: VerifyHistoryEntry[] = [];
+  private nextVerifyId = 1;
   readonly tracker = new UsageTracker();
   readonly activityLog = new ActivityLog();
   readonly verifier: Verifier;
@@ -96,6 +108,10 @@ export class CodingAgent {
   clear(): void {
     this.provider.clear();
     this.memoryInjected = false;
+    this.pendingVerifyChanges = [];
+    this.lastVerifyResult = null;
+    this.verifyHistory = [];
+    this.nextVerifyId = 1;
   }
 
   async loadMemoryContext(): Promise<string> {
@@ -191,11 +207,42 @@ export class CodingAgent {
         const vr = await this.verifier.verify().catch(() => null);
         this.verifier.clear();
         if (vr) {
+          this.lastVerifyResult = vr;
+          this.verifyHistory.unshift({
+            id: `verify-${this.nextVerifyId++}`,
+            timestamp: new Date().toISOString(),
+            result: vr,
+          });
+          this.verifyHistory = this.verifyHistory.slice(0, 12);
+          const verdictLabel = vr.verdict === "block" ? "BLOCKED" : vr.verdict === "warn" ? "WARN" : "PASS";
           const lines: string[] = [
             "---",
             `Verification (by ${vr.provider}):`,
+            `  Status: ${verdictLabel}`,
             `  Confidence: ${vr.confidence}/100`,
           ];
+          if (vr.blockingSummary.length > 0) {
+            lines.push("  Blocking summary:");
+            for (const summary of vr.blockingSummary) {
+              lines.push(`    - ${summary}`);
+            }
+          }
+          if (vr.checks.length > 0) {
+            lines.push("  Checks:");
+            for (const check of vr.checks) {
+              const icon = check.ok ? "✓" : "✗";
+              const sourceLabel = check.source === "fallback" ? " [auto]" : "";
+              lines.push(`    ${icon} ${check.command}${sourceLabel}`);
+              if (!check.ok || check.summary !== `${check.name} passed`) {
+                lines.push(`      ↳ ${this.clipLogContent(check.summary, 160)}`);
+              }
+              if (!check.ok) {
+                for (const detailLine of this.summarizeVerifyCheckOutput(check.output)) {
+                  lines.push(`      ${detailLine}`);
+                }
+              }
+            }
+          }
           if (vr.issues.length === 0) {
             lines.push("  No issues found");
           } else {
@@ -286,6 +333,27 @@ export class CodingAgent {
     return this.verifyEnabled;
   }
 
+  getLastVerifyResult(): VerifyResult | null {
+    return this.lastVerifyResult;
+  }
+
+  getVerifyHistory(): VerifyHistoryEntry[] {
+    return [...this.verifyHistory];
+  }
+
+  setVerifyHistory(history: VerifyHistoryEntry[]): void {
+    this.verifyHistory = [...history]
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, 12);
+    this.lastVerifyResult = this.verifyHistory[0]?.result ?? null;
+    const maxId = this.verifyHistory.reduce((max, entry) => {
+      const match = entry.id.match(/^verify-(\d+)$/);
+      const value = match ? Number(match[1]) : 0;
+      return Math.max(max, value);
+    }, 0);
+    this.nextVerifyId = maxId + 1;
+  }
+
   setVerifyProvider(provider: ProviderName | null, model?: string | null, effort?: string | null): void {
     this.verifier.setProvider(provider, model, effort);
   }
@@ -352,6 +420,7 @@ export class CodingAgent {
     if ("setToolHooks" in this.provider && typeof (this.provider as any).setToolHooks === "function") {
       (this.provider as any).setToolHooks({
         preTool: async (toolName: string, input: Record<string, unknown>) => {
+          await this.capturePendingVerifyChange(toolName, input);
           this.logCurrentActivity("tool-call", this.formatToolCall(toolName, input));
           const results = await this.hooks.run("pre-tool", { tool_name: toolName, tool_input: input }, toolName).catch(() => []);
           let blocked = results.some(r => r.blocked);
@@ -372,13 +441,20 @@ export class CodingAgent {
             if (result.value === "allow") {
               blocked = false;
             } else if (result.value === "__custom__" && result.customText) {
+              this.discardPendingVerifyChange(toolName, input);
               return { blocked: true, reason: `[USER RESPONSE] ${result.customText}`, additionalContext };
             }
           }
           if (blocked) this.logCurrentActivity("error", `${toolName}: ${reason}`);
+          if (blocked) this.discardPendingVerifyChange(toolName, input);
           return { blocked, reason, additionalContext };
         },
         postTool: async (toolName: string, input: Record<string, unknown>, result: { content: string; isError?: boolean }) => {
+          if (!result.isError) {
+            await this.trackVerifiedFileChange(toolName, input);
+          } else {
+            this.discardPendingVerifyChange(toolName, input);
+          }
           this.logCurrentActivity(
             result.isError ? "error" : "tool-result",
             this.formatToolResult(toolName, input, result.content),
@@ -388,11 +464,66 @@ export class CodingAgent {
           return { additionalContext };
         },
         postToolFailure: async (toolName: string, input: Record<string, unknown>, error: string) => {
+          this.discardPendingVerifyChange(toolName, input);
           this.logCurrentActivity("error", this.formatToolResult(toolName, input, error));
           await this.hooks.run("post-tool-failure", { tool_name: toolName, tool_input: input, error }, toolName).catch(() => []);
         },
       });
     }
+  }
+
+  private async capturePendingVerifyChange(toolName: string, input: Record<string, unknown>): Promise<void> {
+    if ((toolName !== "write_file" && toolName !== "edit_file") || typeof input.path !== "string") return;
+    const filePath = this.resolveWorkspacePath(input.path);
+    let oldContent: string | undefined;
+    try {
+      oldContent = await fs.readFile(filePath, "utf8");
+    } catch {
+      oldContent = undefined;
+    }
+    this.pendingVerifyChanges.push({ toolName, path: input.path, oldContent });
+  }
+
+  private async trackVerifiedFileChange(toolName: string, input: Record<string, unknown>): Promise<void> {
+    if ((toolName !== "write_file" && toolName !== "edit_file") || typeof input.path !== "string") return;
+
+    const snapshotIndex = this.pendingVerifyChanges.findIndex((entry) => entry.toolName === toolName && entry.path === input.path);
+    const snapshot = snapshotIndex >= 0 ? this.pendingVerifyChanges.splice(snapshotIndex, 1)[0] : undefined;
+
+    let newContent: string | undefined;
+    try {
+      newContent = await fs.readFile(this.resolveWorkspacePath(input.path), "utf8");
+    } catch {
+      if (toolName === "write_file" && typeof input.content === "string") {
+        newContent = input.content;
+      } else if (toolName === "edit_file" && typeof input.new_string === "string") {
+        newContent = input.new_string;
+      }
+    }
+
+    const oldContent = snapshot?.oldContent
+      ?? (toolName === "edit_file" && typeof input.old_string === "string" ? input.old_string : undefined);
+
+    this.verifier.trackChange(input.path, toolName === "write_file" ? "write" : "edit", oldContent, newContent);
+  }
+
+  private discardPendingVerifyChange(toolName: string, input: Record<string, unknown>): void {
+    if ((toolName !== "write_file" && toolName !== "edit_file") || typeof input.path !== "string") return;
+    const index = this.pendingVerifyChanges.findIndex((entry) => entry.toolName === toolName && entry.path === input.path);
+    if (index >= 0) this.pendingVerifyChanges.splice(index, 1);
+  }
+
+  private resolveWorkspacePath(relativePath: string): string {
+    return path.resolve(this.cwd, relativePath);
+  }
+
+  private summarizeVerifyCheckOutput(output: string, maxLines = 2): string[] {
+    return output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, maxLines)
+      .map((line) => this.clipLogContent(line, 160));
   }
 
   private logCurrentActivity(type: "tool-call" | "tool-result" | "info" | "error", content: string): void {

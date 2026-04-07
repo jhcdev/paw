@@ -275,6 +275,140 @@ describe("CodingAgent", () => {
       const agent = createAgent();
       expect(agent.isVerifyEnabled()).toBe(false);
     });
+
+    it("tracks file writes from tool hooks and appends verification output", async () => {
+      let installedHooks: any;
+      let callCount = 0;
+      mockProvider.setToolHooks = vi.fn((hooks: unknown) => {
+        installedHooks = hooks;
+      });
+      mockProvider.runTurn = vi.fn(async (_prompt: string) => {
+        callCount++;
+        if (callCount === 1) {
+          await installedHooks.preTool("write_file", { path: "src/generated.ts", content: "export const generated = true;\n" });
+          await fs.mkdir(path.join(tmpDir, "src"), { recursive: true });
+          await fs.writeFile(path.join(tmpDir, "src", "generated.ts"), "export const generated = true;\n");
+          await installedHooks.postTool("write_file", { path: "src/generated.ts", content: "export const generated = true;\n" }, { content: "Wrote src/generated.ts" });
+          return { text: "implemented", usage: { inputTokens: 100, outputTokens: 50 } };
+        }
+        return { text: "VERDICT: PASS\nCONFIDENCE: 88\nISSUES:\nEND", usage: { inputTokens: 10, outputTokens: 5 } };
+      });
+
+      const agent = createAgent();
+      agent.enableVerify(true);
+
+      const result = await agent.runTurn("create file");
+
+      expect(result.text).toContain("Verification (by anthropic):");
+      expect(result.text).toContain("Status: PASS");
+      expect(agent.verifier.hasPendingChanges()).toBe(false);
+      expect(agent.getLastVerifyResult()).not.toBeNull();
+      expect(agent.getVerifyHistory()).toHaveLength(1);
+    });
+
+    it("includes failing check details in verification output", async () => {
+      await fs.writeFile(path.join(tmpDir, "package.json"), JSON.stringify({
+        name: "verify-output-test",
+        scripts: {
+          test: "node -e \"console.error('failing suite'); process.exit(1)\"",
+        },
+      }));
+
+      let installedHooks: any;
+      let callCount = 0;
+      mockProvider.setToolHooks = vi.fn((hooks: unknown) => {
+        installedHooks = hooks;
+      });
+      mockProvider.runTurn = vi.fn(async () => {
+        callCount++;
+        if (callCount === 1) {
+          await installedHooks.preTool("write_file", { path: "src/generated.ts", content: "export const generated = true;\n" });
+          await fs.mkdir(path.join(tmpDir, "src"), { recursive: true });
+          await fs.writeFile(path.join(tmpDir, "src", "generated.ts"), "export const generated = true;\n");
+          await installedHooks.postTool("write_file", { path: "src/generated.ts", content: "export const generated = true;\n" }, { content: "Wrote src/generated.ts" });
+          return { text: "implemented", usage: { inputTokens: 100, outputTokens: 50 } };
+        }
+        return { text: "VERDICT: PASS\nCONFIDENCE: 91\nISSUES:\nEND", usage: { inputTokens: 10, outputTokens: 5 } };
+      });
+
+      const agent = createAgent();
+      agent.enableVerify(true);
+
+      const result = await agent.runTurn("create file");
+
+      expect(result.text).toContain("Status: BLOCKED");
+      expect(result.text).toContain("Blocking summary:");
+      expect(result.text).toContain("✗ npm run --silent test");
+      expect(result.text).toContain("failing suite");
+    });
+
+    it("stores recent verification history with newest first", async () => {
+      let installedHooks: any;
+      let callCount = 0;
+      mockProvider.setToolHooks = vi.fn((hooks: unknown) => {
+        installedHooks = hooks;
+      });
+      mockProvider.runTurn = vi.fn(async () => {
+        callCount++;
+        if (callCount === 1 || callCount === 3) {
+          const fileName = callCount === 1 ? "first.ts" : "second.ts";
+          await installedHooks.preTool("write_file", { path: `src/${fileName}`, content: `export const ${fileName.replace(".ts", "")} = true;\n` });
+          await fs.mkdir(path.join(tmpDir, "src"), { recursive: true });
+          await fs.writeFile(path.join(tmpDir, "src", fileName), `export const ${fileName.replace(".ts", "")} = true;\n`);
+          await installedHooks.postTool("write_file", { path: `src/${fileName}`, content: `export const ${fileName.replace(".ts", "")} = true;\n` }, { content: `Wrote src/${fileName}` });
+          return { text: "implemented", usage: { inputTokens: 100, outputTokens: 50 } };
+        }
+        return { text: "VERDICT: PASS\nCONFIDENCE: 80\nISSUES:\nEND", usage: { inputTokens: 10, outputTokens: 5 } };
+      });
+
+      const agent = createAgent();
+      agent.enableVerify(true);
+
+      await agent.runTurn("first change");
+      await agent.runTurn("second change");
+
+      const history = agent.getVerifyHistory();
+      expect(history).toHaveLength(2);
+      expect(history[0]!.id).not.toBe(history[1]!.id);
+      expect(history[0]!.timestamp >= history[1]!.timestamp).toBe(true);
+    });
+
+    it("restores persisted verification history", () => {
+      const agent = createAgent();
+      agent.setVerifyHistory([
+        {
+          id: "verify-2",
+          timestamp: "2026-04-07T00:00:02.000Z",
+          result: {
+            verified: true,
+            verdict: "pass",
+            confidence: 90,
+            issues: [],
+            checks: [],
+            blockingSummary: [],
+            provider: "anthropic",
+            ms: 200,
+          },
+        },
+        {
+          id: "verify-1",
+          timestamp: "2026-04-07T00:00:01.000Z",
+          result: {
+            verified: false,
+            verdict: "block",
+            confidence: 20,
+            issues: [{ severity: "error", file: "src/app.ts", description: "failed" }],
+            checks: [],
+            blockingSummary: ["test: failed"],
+            provider: "ollama",
+            ms: 100,
+          },
+        },
+      ]);
+
+      expect(agent.getVerifyHistory()).toHaveLength(2);
+      expect(agent.getLastVerifyResult()?.confidence).toBe(90);
+    });
   });
 
   describe("runStopHook", () => {
