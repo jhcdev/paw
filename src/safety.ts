@@ -21,7 +21,7 @@ export type SafetyConfig = {
 };
 
 // LOW risk patterns — read-only tools
-const LOW_RISK_TOOLS = new Set(["list_files", "read_file", "search_text", "glob", "web_fetch"]);
+const LOW_RISK_TOOLS = new Set(["list_files", "read_file", "read_image", "search_text", "glob", "web_fetch"]);
 
 // MEDIUM risk tools — file modification
 const MEDIUM_RISK_TOOLS = new Set(["write_file", "edit_file"]);

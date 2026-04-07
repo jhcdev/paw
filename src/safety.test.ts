@@ -4,7 +4,7 @@ import { classifyRisk, type SafetyCheck } from "./safety.js";
 describe("classifyRisk", () => {
   // ── LOW risk ──
   describe("low risk (read-only tools)", () => {
-    const lowTools = ["list_files", "read_file", "search_text", "glob", "web_fetch"];
+    const lowTools = ["list_files", "read_file", "read_image", "search_text", "glob", "web_fetch"];
 
     for (const tool of lowTools) {
       it(`classifies ${tool} as low`, () => {
@@ -14,6 +14,13 @@ describe("classifyRisk", () => {
         expect(result.autoCheckpoint).toBe(false);
       });
     }
+
+    it("classifies read_image with an absolute path as low", () => {
+      const result = classifyRisk("read_image", { path: "/home/image_ch1.png" });
+      expect(result.level).toBe("low");
+      expect(result.requiresConfirm).toBe(false);
+      expect(result.autoCheckpoint).toBe(false);
+    });
   });
 
   // ── MEDIUM risk ──

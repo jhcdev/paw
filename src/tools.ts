@@ -8,6 +8,20 @@ import { classifyRisk, createCheckpoint, type SafetyConfig } from "./safety.js";
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".tif": "image/tiff",
+  ".tiff": "image/tiff",
+  ".avif": "image/avif",
+};
+
 async function resolveWithinCwd(cwd: string, maybeRelative: string): Promise<string> {
   const resolved = path.resolve(cwd, maybeRelative);
   if (!resolved.startsWith(path.resolve(cwd))) {
@@ -29,6 +43,28 @@ async function resolveWithinCwd(cwd: string, maybeRelative: string): Promise<str
     }
     return resolved;
   }
+}
+
+async function resolveReadImagePath(cwd: string, inputPath: string): Promise<string> {
+  if (!path.isAbsolute(inputPath)) {
+    return resolveWithinCwd(cwd, inputPath);
+  }
+
+  const resolved = path.resolve(inputPath);
+  try {
+    return await fs.realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+function getImageMimeType(filePath: string): string {
+  const extension = path.extname(filePath).toLowerCase();
+  const mimeType = IMAGE_MIME_TYPES[extension];
+  if (!mimeType) {
+    throw new Error(`Unsupported image extension: ${extension || "(none)"}`);
+  }
+  return mimeType;
 }
 
 function detectShell(): string {
@@ -55,6 +91,33 @@ async function readFile(input: Record<string, unknown>, cwd: string): Promise<To
   }
   const content = await fs.readFile(fullPath, "utf8");
   return { content };
+}
+
+async function readImage(input: Record<string, unknown>, cwd: string): Promise<ToolResult> {
+  if (typeof input.path !== "string") throw new Error("path is required");
+
+  let fullPath: string;
+  try {
+    fullPath = await resolveReadImagePath(cwd, input.path);
+    const mimeType = getImageMimeType(fullPath);
+    const stat = await fs.stat(fullPath);
+    if (!stat.isFile()) {
+      return { content: `Path is not a file: ${fullPath}`, isError: true };
+    }
+
+    const buffer = await fs.readFile(fullPath);
+    return {
+      content: JSON.stringify({
+        path: fullPath,
+        mimeType,
+        byteSize: stat.size,
+        encoding: "base64",
+        data: buffer.toString("base64"),
+      }, null, 2),
+    };
+  } catch (error) {
+    return { content: error instanceof Error ? error.message : String(error), isError: true };
+  }
 }
 
 async function writeFile(input: Record<string, unknown>, cwd: string): Promise<ToolResult> {
@@ -221,6 +284,17 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: "read_image",
+    description: "Read an image file and return JSON metadata with base64-encoded binary data.",
+    input_schema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Relative workspace path or absolute image path." },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "write_file",
     description: "Create or overwrite a UTF-8 text file inside the workspace.",
     input_schema: {
@@ -297,6 +371,7 @@ export const toolDefinitions: ToolDefinition[] = [
 export const toolHandlers: Record<string, ToolHandler> = {
   list_files: listFiles,
   read_file: readFile,
+  read_image: readImage,
   write_file: writeFile,
   edit_file: editFile,
   search_text: searchText,
