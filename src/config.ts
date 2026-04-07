@@ -14,7 +14,7 @@ const envSchema = z.object({
   OLLAMA_BASE_URL: z.string().min(1).default("http://127.0.0.1:11434"),
   OLLAMA_MODEL: z.string().min(1).default("qwen3"),
   VLLM_BASE_URL: z.string().min(1).default("http://localhost:8000"),
-  VLLM_MODEL: z.string().min(1).default(""),
+  VLLM_MODEL: z.string().default(""),
   VLLM_API_KEY: z.string().optional(),
 });
 
