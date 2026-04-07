@@ -11,7 +11,7 @@
 <table>
 <tr><td><b>Multi-provider, zero lock-in</b></td><td>Anthropic (Claude), Codex (ChatGPT subscription), and Ollama (local/free) — all active at once. Rate limit on Claude? Auto-switches to Codex. Need free local inference? Ollama is always there. No manual intervention.</td></tr>
 <tr><td><b>Parallel sub-agents</b></td><td>Spawn independent agents that work in background while you keep chatting. Each spawned agent inherits your current model and session context. Round-robin across providers or pin to a specific one.</td></tr>
-<tr><td><b>Cross-provider verification</b></td><td>AI writes code → a <i>different</i> AI reviews it automatically. Catches N+1 queries, race conditions, injection vulnerabilities, and logic errors that single-model tools miss.</td></tr>
+<tr><td><b>Cross-provider verification</b></td><td>AI writes code → a <i>different</i> AI reviews it automatically. Paw also runs local checks (typecheck/build/test/lint when available), summarizes blockers inline, and keeps browsable verification logs across sessions.</td></tr>
 <tr><td><b>Agent safety</b></td><td>Every tool call is risk-classified in real-time. Destructive commands (rm -rf, mkfs, curl|sh) are blocked before they execute. High-risk operations auto-checkpoint via git stash.</td></tr>
 <tr><td><b>Cross-session memory</b></td><td>PAW.md hierarchy — global instructions, project instructions, personal notes, and auto-learned context. Memory injected on session start, survives compaction, persists across sessions.</td></tr>
 <tr><td><b>Skills + Hooks</b></td><td>7 built-in slash commands + unlimited custom skills with $ARGUMENTS, !`command` injection, and SKILL.md directories. 10 lifecycle hook events with regex matchers, JSON stdin, and exit-code blocking.</td></tr>
@@ -163,22 +163,32 @@ Supports: English, Korean, Japanese, Chinese.
 
 ### `/verify` — Cross-Provider Verification
 
-AI generates code → a different AI reviews it. Choose reviewer via ↑↓ panel.
+AI generates code → a different AI reviews it. Paw also runs local verification checks when available and stores recent verification runs for later browsing.
 
 ```
 ---
 Verification (by codex/gpt-5.4):
+  Status: BLOCKED
   Confidence: 85/100
-  warning: src/auth.ts — Potential SQL injection
-  info: src/routes.ts — Consider rate limiting
+  Blocking summary:
+    - test: failing suite
+  Checks:
+    ✗ npm run --silent test
+      ↳ failing suite
+  [error] src/auth.ts: Potential SQL injection
 ---
+```
+
+```bash
+/verify        # reviewer / effort settings
+/verify logs   # browse recent verification runs, sections, and full logs
 ```
 
 ### `/safety` — Risk Classification
 
 | Level | Examples | Action |
 |-------|---------|--------|
-| **Low** | `read_file`, `search_text`, `glob` | Execute immediately |
+| **Low** | `read_file`, `read_image`, `search_text`, `glob` | Execute immediately |
 | **Medium** | `write_file`, `edit_file`, `npm run build` | Execute immediately |
 | **High** | `rm`, `git reset`, `terraform destroy` | Blocked + git checkpoint |
 | **Critical** | `rm -rf /`, `mkfs`, `curl\|sh` | Permanently blocked |
@@ -286,9 +296,9 @@ Exit 0 = proceed (stdout → AI context). Exit 2 = block (stderr → AI feedback
 
 ## Tools & MCP
 
-### 8 Built-in Tools
+### 9 Built-in Tools
 
-`list_files` · `read_file` · `write_file` · `edit_file` · `search_text` · `run_shell` · `glob` · `web_fetch`
+`list_files` · `read_file` · `read_image` · `write_file` · `edit_file` · `search_text` · `run_shell` · `glob` · `web_fetch`
 
 ### MCP (Model Context Protocol)
 
@@ -317,6 +327,7 @@ Interactive manager via `/mcp`. Supports stdio, HTTP, SSE. Tools auto-injected i
 | `/auto <task>` | Autonomous agent mode |
 | `/pipe <cmd>` | Shell output → AI |
 | `/verify` | Cross-provider verification (↑↓) |
+| `/verify logs` | Browse recent verification history + full logs |
 | `/safety` | Safety guards |
 | `/memory` | View loaded memory |
 | `/remember <note>` | Save note across sessions |
@@ -344,7 +355,7 @@ Interactive manager via `/mcp`. Supports stdio, HTTP, SSE. Tools auto-injected i
 | File | Purpose |
 |------|---------|
 | `~/.paw/credentials.json` | API keys (0600) |
-| `~/.paw/sessions/*.json` | Session history |
+| `~/.paw/sessions/*.json` | Session history + recent verification history |
 | `~/.paw/team-scores.json` | Team performance scores |
 | `~/.paw/PAW.md` | Global instructions |
 | `~/.paw/memory/` | Auto-learned memory |
