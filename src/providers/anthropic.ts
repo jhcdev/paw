@@ -30,16 +30,21 @@ function formatToolStatus(name: string, input: Record<string, unknown>): string 
 function formatToolDiff(name: string, input: Record<string, unknown>): string | null {
   const p = (key: string) => typeof input[key] === "string" ? input[key] as string : "";
   if (name === "edit_file") {
-    const oldCount = p("old_string").split("\n").length;
-    const newCount = p("new_string").split("\n").length;
-    const added = Math.max(0, newCount - oldCount) + Math.min(oldCount, newCount);
-    const removed = Math.max(0, oldCount - newCount) + Math.min(oldCount, newCount);
-    const summary = `  ⎿  Added ${newCount} lines, removed ${oldCount} lines`;
-    const oldLines = p("old_string").split("\n").slice(0, 4).map((l) => `     - ${truncLine(l, 70)}`);
-    const newLines = p("new_string").split("\n").slice(0, 4).map((l) => `     + ${truncLine(l, 70)}`);
-    const oldExtra = oldCount > 4 ? `     - … (+${oldCount - 4} more)` : "";
-    const newExtra = newCount > 4 ? `     + … (+${newCount - 4} more)` : "";
-    return [summary, ...oldLines, ...(oldExtra ? [oldExtra] : []), ...newLines, ...(newExtra ? [newExtra] : [])].join("\n");
+    const oldLines = p("old_string").split("\n");
+    const newLines = p("new_string").split("\n");
+    // Find common prefix and suffix — only show actually changed lines
+    let start = 0;
+    while (start < oldLines.length && start < newLines.length && oldLines[start] === newLines[start]) start++;
+    let oldEnd = oldLines.length;
+    let newEnd = newLines.length;
+    while (oldEnd > start && newEnd > start && oldLines[oldEnd - 1] === newLines[newEnd - 1]) { oldEnd--; newEnd--; }
+    const delLines = oldLines.slice(start, oldEnd).map((l) => `     - ${truncLine(l, 70)}`);
+    const addLines = newLines.slice(start, newEnd).map((l) => `     + ${truncLine(l, 70)}`);
+    const all = [...delLines, ...addLines];
+    if (all.length === 0) return null;
+    const shown = all.slice(0, 6);
+    if (all.length > 6) shown.push(`     … (+${all.length - 6} more)`);
+    return shown.join("\n");
   }
   return null;
 }

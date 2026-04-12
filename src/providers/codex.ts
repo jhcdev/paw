@@ -99,13 +99,15 @@ export class CodexProvider implements LlmProvider {
           // Parse Codex stderr — known patterns:
           // exec: "/bin/bash -lc <cmd> in <cwd>"
           // patch: "apply patch" → "patch: completed" → "<filepath>" → "diff --git ..."
-          for (const line of chunk.split("\n")) {
+          const chunkLines = chunk.split("\n");
+          for (let idx = 0; idx < chunkLines.length; idx++) {
+            const line = chunkLines[idx]!;
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith("warning:") || trimmed.startsWith("Warning")) continue;
             // Match command execution: /bin/bash -lc "cmd" in /path
             const execMatch = trimmed.match(/^\/bin\/bash\s+-lc\s+(.+?)\s+in\s+\//);
             if (execMatch) {
-              const cmd = execMatch[1].replace(/^["']|["']$/g, "").slice(0, 60);
+              const cmd = execMatch[1]!.replace(/^["']|["']$/g, "").slice(0, 60);
               if (cmd.startsWith("cat ") || cmd.startsWith("sed ")) { onStatus(`tool: Read(${cmd.slice(4).trim()})`); }
               else if (cmd.startsWith("rg ")) { onStatus(`tool: Search(${cmd.slice(3).trim()})`); }
               else { onStatus(`tool: Bash(${cmd})`); }
@@ -116,13 +118,18 @@ export class CodexProvider implements LlmProvider {
             else if (/^diff --git/.test(trimmed)) {
               const diffMatch = trimmed.match(/^diff --git\s+\S+\s+b\/(.+)/);
               if (diffMatch) {
-                // Collect +/- lines from the diff in the same chunk
-                const diffLines = chunk.split("\n")
-                  .filter((l) => /^\+[^+]/.test(l) || /^-[^-]/.test(l))
-                  .slice(0, 4)
-                  .map((l) => `     ${l.slice(0, 70)}`);
+                // Collect +/- lines only from THIS file's section (until next diff --git)
+                const diffLines: string[] = [];
+                for (let j = idx + 1; j < chunkLines.length; j++) {
+                  const nextLine = chunkLines[j]!;
+                  if (/^diff --git/.test(nextLine.trim())) break;
+                  if (/^\+[^+]/.test(nextLine) || /^-[^-]/.test(nextLine)) {
+                    diffLines.push(`     ${nextLine.slice(0, 70)}`);
+                    if (diffLines.length >= 4) break;
+                  }
+                }
                 const detail = diffLines.length > 0 ? `\n  ⎿  ${diffLines.length} change(s)\n${diffLines.join("\n")}` : "";
-                onStatus(`tool: Update(${diffMatch[1].slice(0, 60)})${detail}`);
+                onStatus(`tool: Update(${diffMatch[1]!.slice(0, 60)})${detail}`);
               }
             }
             // Match "codex" thinking lines
