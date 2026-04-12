@@ -2040,7 +2040,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const cogLine = `✻ Cogitated for ${totalElapsed >= 60 ? `${Math.floor(totalElapsed / 60)}m ${Math.round(totalElapsed % 60)}s` : `${totalElapsed.toFixed(1)}s`}`;
           const stepLog = autoLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
           const output = result.summary || result.steps.filter((s) => s.action === "done" && s.result).map((s) => s.result).join("\n");
-          setEntries((c) => [...c, { role: "assistant", text: `${stepLog}\n\n${cogLine}\n\n${output}` }]);
+          setEntries((c) => [...c, { role: "assistant", text: `${stepLog}\n\n${output}\n\n${cogLine}` }]);
         } else if (route.mode === "pipe") {
           const pipeStart = Date.now();
           const pipeLines: string[] = [];
@@ -2074,7 +2074,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const pipeElapsed = ((Date.now() - pipeStart) / 1000);
           const pipeCog = `✻ Cogitated for ${pipeElapsed >= 60 ? `${Math.floor(pipeElapsed / 60)}m ${Math.round(pipeElapsed % 60)}s` : `${pipeElapsed.toFixed(1)}s`}`;
           const pipeLog = pipeLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
-          setEntries((c) => [...c, { role: "assistant", text: `${pipeLog}\n\n${pipeCog}\n\n${result.analysis}` }]);
+          setEntries((c) => [...c, { role: "assistant", text: `${pipeLog}\n\n${result.analysis}\n\n${pipeCog}` }]);
         } else if (route.mode === "skill") {
           const skillStart = Date.now();
           const skills = await loadSkills(options.cwd);
@@ -2104,7 +2104,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             const skillElapsed = ((Date.now() - skillStart) / 1000);
             const skillCog = `✻ Cogitated for ${skillElapsed.toFixed(1)}s`;
             const skillLog = skillLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
-            setEntries((c) => [...c, { role: "assistant", text: `${skillLog}\n\n${skillCog}\n\n${result.text || "(empty)"}` }]);
+            setEntries((c) => [...c, { role: "assistant", text: `${skillLog}\n\n${result.text || "(empty)"}\n\n${skillCog}` }]);
           } else {
             setThinkMsg(randomCatMood());
             const result = await agent.runTurn(enrichedLine);
@@ -2146,7 +2146,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const teamCog = `✻ Cogitated for ${teamElapsed >= 60 ? `${Math.floor(teamElapsed / 60)}m ${Math.round(teamElapsed % 60)}s` : `${teamElapsed.toFixed(1)}s`}`;
           const teamLog = result.phases.map((p) => `● ${p.role} (${p.provider}/${p.model}) (${(p.ms / 1000).toFixed(1)}s)`).join("\n");
           const teamOutput = result.phases.map((p) => p.text).join("\n\n");
-          setEntries((c) => [...c, { role: "assistant", text: `${teamLog}\n\n${teamCog}\n\n${teamOutput}` }]);
+          setEntries((c) => [...c, { role: "assistant", text: `${teamLog}\n\n${teamOutput}\n\n${teamCog}` }]);
         } else {
           // Solo mode — stream response in real-time
           setThinkMsg(randomCatMood());
@@ -2196,11 +2196,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setStreamingText("");
           setTurnCount((c) => c + 1);
           const turnElapsed = ((Date.now() - turnStart) / 1000);
-          const thinkLine = turnElapsed >= 1 ? `✻ Cogitated for ${turnElapsed >= 60 ? `${Math.floor(turnElapsed / 60)}m ${Math.round(turnElapsed % 60)}s` : `${turnElapsed.toFixed(1)}s`}\n\n` : "";
+          const thinkLine = turnElapsed >= 1 ? `\n\n✻ Cogitated for ${turnElapsed >= 60 ? `${Math.floor(turnElapsed / 60)}m ${Math.round(turnElapsed % 60)}s` : `${turnElapsed.toFixed(1)}s`}` : "";
           const toolSummary = toolLines.length > 0
-            ? toolLines.map((t) => `● ${t.split("\n")[0]}${t.includes("\n") ? "\n" + t.split("\n").slice(1).join("\n") : ""}`).join("\n") + "\n\n" + thinkLine
-            : thinkLine;
-          setEntries((c) => [...c, { role: "assistant", text: toolSummary + (result.text || "(empty response)") }]);
+            ? toolLines.map((t) => `● ${t.split("\n")[0]}${t.includes("\n") ? "\n" + t.split("\n").slice(1).join("\n") : ""}`).join("\n") + "\n\n"
+            : "";
+          setEntries((c) => [...c, { role: "assistant", text: toolSummary + (result.text || "(empty response)") + thinkLine }]);
           const stopResult = await agent.runStopHook();
           if (stopResult.blocked && stopResult.reason) {
             setEntries(c => [...c, { role: "system", text: `Hook feedback: ${stopResult.reason}` }]);
