@@ -321,22 +321,22 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
   const [aiChunkText, setAiChunkText] = useState("");
   const toolActivityIdRef = React.useRef(0);
+  const currentToolIdRef = React.useRef<number | null>(null);
 
   const pushToolActivity = React.useCallback((label: string) => {
     const activity = parseToolActivity(label);
-    const id = ++toolActivityIdRef.current;
     if (activity.done) {
-      setToolActivities((prev) => {
-        const updated = [...prev];
-        for (let i = updated.length - 1; i >= 0; i--) {
-          if (updated[i]!.name === activity.name && !updated[i]!.done) {
-            updated[i] = { ...updated[i]!, done: true, elapsed: activity.elapsed, result: activity.result };
-            return updated;
-          }
-        }
-        return [...prev.slice(-4), { id, ...activity }];
-      });
+      // Use the ref to find the exact running entry by ID (sync, no name-match ambiguity)
+      const targetId = currentToolIdRef.current;
+      currentToolIdRef.current = null;
+      setToolActivities((prev) => prev.map((a) =>
+        a.id === targetId
+          ? { ...a, done: true, elapsed: activity.elapsed, result: activity.result ?? a.result }
+          : a
+      ));
     } else {
+      const id = ++toolActivityIdRef.current;
+      currentToolIdRef.current = id;
       setToolActivities((prev) => [...prev.slice(-4), { id, ...activity }]);
     }
   }, []);
@@ -2113,7 +2113,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               setThinkMsg(`${icon} ${step.description}`);
             },
           );
-          auto.setChunkCallback((chunk) => setAiChunkText(chunk));
+          auto.setChunkCallback((chunk) => setAiChunkText((prev) => prev + chunk));
           auto.setToolStatusCallback((status) => {
             if (!status.startsWith("tool: ")) return;
             const label = status.slice(6);
@@ -2373,7 +2373,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               renderAutoLines();
             },
           );
-          auto.setChunkCallback((chunk) => { setAiChunkText(chunk); });
+          auto.setChunkCallback((chunk) => { setAiChunkText((prev) => prev + chunk); });
           auto.setToolStatusCallback((status) => {
             if (status.startsWith("tool: ")) {
               const label = status.slice(6);
@@ -2689,16 +2689,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                 const color = act.done ? "gray" : getToolColor(act.name);
                 const icon = act.done ? "✓" : "◉";
                 const name = act.name.padEnd(7);
-                const detail = act.detail.length > 55 ? `…${act.detail.slice(-54)}` : act.detail;
-                const suffix = act.done
-                  ? ` ${act.elapsed ?? ""}${act.result ? `  ⎿  ${act.result}` : ""}`.trimEnd()
-                  : "";
+                const detail = act.detail.length > 52 ? `…${act.detail.slice(-51)}` : act.detail;
+                const timePart = act.done && act.elapsed ? `  ${act.elapsed}` : "";
+                const resultPart = act.result ? `  ⎿  ${act.result}` : "";
                 return (
                   <Box key={act.id}>
                     <Text color={color} bold={!act.done}>{`${icon} `}</Text>
                     <Text color={color} bold={!act.done}>{name}</Text>
                     <Text color={act.done ? "gray" : "white"}>{detail}</Text>
-                    {suffix ? <Text color="gray">{suffix}</Text> : null}
+                    {(timePart || resultPart) ? <Text color="gray">{timePart}{resultPart}</Text> : null}
                   </Box>
                 );
               })}
