@@ -2514,8 +2514,9 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             setThinkMsg(`skill: /${route.skillName}`);
             renderSkillLines();
             const fullPrompt = await renderSkill(skill, route.context, options.cwd);
-            const result = await agent.runTurn(fullPrompt, undefined, (status) => {
+            const result = await agent.runTurn(fullPrompt, (chunk) => setAiChunkText((p) => p + chunk), (status) => {
               if (status.startsWith("tool: ")) {
+                setAiChunkText("");
                 const label = status.slice(6);
                 pushToolActivity(label);
                 if (/\(\d+\.\d+s\)/.test(label.split("\n")[0])) {

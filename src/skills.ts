@@ -22,8 +22,15 @@ const PROJECT_SKILLS_DIR = ".paw/skills";
 const BUILTIN_SKILLS: Skill[] = [
   {
     name: "review",
-    description: "Review code for bugs, security, and best practices",
-    prompt: "Review the following code for bugs, security vulnerabilities, performance issues, and best practices. Be specific with file:line references.",
+    description: "Review code for bugs, security, and best practices — then fix any issues found",
+    prompt: `Review the code thoroughly for bugs, security vulnerabilities, performance issues, and best practices.
+
+After identifying issues:
+1. List each problem with file:line reference and severity (critical/major/minor)
+2. Fix every critical and major issue directly by editing the files
+3. For minor/style issues, note them but don't auto-fix unless asked
+
+Work step by step: read → identify → fix → verify.`,
     source: "builtin",
   },
   {
