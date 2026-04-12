@@ -29,6 +29,24 @@ function truncateLine(text: string, limit = HISTORY_LINE_LIMIT): string {
   return normalized.slice(0, Math.max(0, limit - 1)).trimEnd() + "…";
 }
 
+function formatElapsedMs(activity: Activity): string {
+  const elapsedMs = (activity.finishedAt ?? Date.now()) - activity.startedAt;
+  return `${(elapsedMs / 1000).toFixed(1)}s`;
+}
+
+function formatActivityIcon(activity: Activity): string {
+  return activity.status === "done" ? "✓" : activity.status === "error" ? "✗" : "◉";
+}
+
+export function getActivitySummary(activity: Activity, limit = 100): string {
+  return activity.detail
+    ? truncateLine(activity.detail, limit)
+    : truncateLine(
+      activity.logs.find((log) => log.type !== "prompt" && log.type !== "response")?.content ?? "",
+      limit,
+    );
+}
+
 function formatLogPrefix(type: LogEntry["type"]): string {
   switch (type) {
     case "tool-call":
@@ -48,9 +66,8 @@ function formatLogPrefix(type: LogEntry["type"]): string {
 
 export function formatActivityForHistory(activity: Activity): string | null {
   const interestingLogs = activity.logs.filter((log) => log.type !== "prompt" && log.type !== "response");
-  const elapsedMs = (activity.finishedAt ?? Date.now()) - activity.startedAt;
-  const elapsed = `${(elapsedMs / 1000).toFixed(1)}s`;
-  const icon = activity.status === "done" ? "✓" : activity.status === "error" ? "✗" : "◉";
+  const elapsed = formatElapsedMs(activity);
+  const icon = formatActivityIcon(activity);
   const lines = [`${icon} ${activity.name} (${elapsed})`];
 
   const summaryOnly =
@@ -71,6 +88,16 @@ export function formatActivityForHistory(activity: Activity): string | null {
   }
 
   return lines.join("\n");
+}
+
+export function formatActivityForList(activity: Activity): string {
+  const icon = formatActivityIcon(activity);
+  const elapsed = formatElapsedMs(activity);
+  const summary = getActivitySummary(activity, 100);
+
+  return summary
+    ? `${icon} ${activity.id} ${activity.name} (${elapsed}) — ${summary}`
+    : `${icon} ${activity.id} ${activity.name} (${elapsed})`;
 }
 
 export class ActivityLog {

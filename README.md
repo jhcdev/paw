@@ -136,13 +136,32 @@ Spawn independent agents that work in parallel — even while the main AI is thi
 you  explain the architecture        ← main AI starts working
 you  /spawn add tests for auth       ← runs immediately in background
 you  /spawn update README            ← another agent, same or different provider
-you  /tasks                          ← check progress anytime
+you  /agents                         ← check all agent progress and details
 ```
 
 - Uses your current `/model` selection (follows changes automatically)
 - Receives session context (last 10 entries) — understands what you're working on
 - Completed results auto-injected into your next turn
 - Interactive panel (`/spawn`) or inline (`/spawn codex/gpt-5.4 fix lint`)
+
+### `/agents` — Agent Activity Browser
+
+Use one command for recent agent work, spawned task status, and detail browsing.
+
+```
+/agents         → summary + interactive browser for recent agent activity
+/agents search auth → open the browser with matching activity only
+/agents latest  → open the latest agent detail view
+/agents list    → print unified activity overview
+/agents results → print completed spawned-agent results
+/agents clear   → clear completed spawned-agent tasks
+```
+
+- Includes normal chat turns, `/auto`, team phases, and spawned agents
+- Spawn status/results now live under `/agents`; `/tasks` remains a legacy alias
+- Type in the browser to filter, then press `Enter` to open detail and `Esc` to return
+- Detail view shows per-activity logs and status
+- Use the activity ID from `/agents list` to reopen a specific entry
 
 ### `/pipe` — Shell Output → AI
 
@@ -332,7 +351,8 @@ Interactive manager via `/mcp`. Supports stdio, HTTP, SSE. Tools auto-injected i
 | `/model` | Model catalog & switch (↑↓) |
 | `/team` | Team dashboard (↑↓) |
 | `/spawn` | Spawn parallel sub-agent (↑↓) |
-| `/tasks` | Spawned agent status/results |
+| `/agents` | Unified agent activity, spawn status/results |
+| `/tasks` | Legacy alias for `/agents status/results` |
 | `/auto <task>` | Autonomous agent mode |
 | `/pipe <cmd>` | Shell output → AI |
 | `/verify` | Cross-provider verification (↑↓) |

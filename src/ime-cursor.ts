@@ -34,7 +34,7 @@ export function countLinesBelowInput({
   let linesBelow = baseLinesBelowInput; // input border-bottom + status area baseline
 
   if (isViewingActivitySelector) {
-    return linesBelow + activitySelectorCount + 1; // items + hint
+    return linesBelow + Math.max(activitySelectorCount, 1) + 2; // search + items/empty + hint
   }
 
   if (isViewingActivityDetail) {

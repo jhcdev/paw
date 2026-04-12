@@ -253,7 +253,7 @@ describe("IME cursor positioning", () => {
       baseLinesBelowInput: 2,
       activitySelectorCount: 3,
       isViewingActivitySelector: true,
-    })).toBe(6);
+    })).toBe(7);
   });
 
   it("includes activity detail footer rows", () => {

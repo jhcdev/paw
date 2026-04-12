@@ -10,7 +10,8 @@ import { Box, Newline, render, Text, useApp, useInput } from "ink";
 
 import type { CodingAgent, VerifyHistoryEntry } from "./agent.js";
 import { appendToSession, saveSession, listSessions, watchSession, type SessionData, type SessionEntry } from "./session.js";
-import { formatActivityForHistory } from "./activity-log.js";
+import { formatActivityForHistory, getActivitySummary, type Activity } from "./activity-log.js";
+import { formatAgentOverview, getAgentBrowserActivities } from "./agent-activity.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName, UserPrompt, UserPromptResult } from "./types.js";
 import { formatModelList, getAllFilteredModels, resolveModelByIndex, detectPlan } from "./model-catalog.js";
@@ -18,7 +19,7 @@ import { routeMessage } from "./smart-router.js";
 import { loadSkills, formatSkillList, renderSkill } from "./skills.js";
 import { AutoAgent } from "./auto-agent.js";
 import { PipeAgent } from "./pipe-agent.js";
-import { SpawnManager } from "./spawn-agent.js";
+import { SpawnManager, type SpawnedTask } from "./spawn-agent.js";
 import { loadMemory, appendMemory, formatMemoryInfo } from "./memory.js";
 import { cursorManager } from "./cursor-manager.js";
 import { Cursor, pushToKillRing, getLastKill, resetKillAccumulation } from "./cursor.js";
@@ -58,6 +59,14 @@ const PROVIDER_LABELS: Record<ProviderName, string> = {
   ollama: "Ollama",
   vllm: "vLLM",
 };
+
+function getRecentAgentActivities(agent: CodingAgent, limit = 10): Activity[] {
+  return getAllAgentActivities(agent).slice(-limit);
+}
+
+function getAllAgentActivities(agent: CodingAgent): Activity[] {
+  return agent.activityLog.getAll().filter((activity) => activity.type === "agent");
+}
 
 const CAT_MOODS = [
   "purring softly...",
@@ -176,7 +185,8 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/auto", desc: "autonomous agent mode" },
   { name: "/pipe", desc: "feed shell output to AI" },
   { name: "/spawn", desc: "spawn a parallel sub-agent (↑↓ or /spawn <task>)" },
-  { name: "/tasks", desc: "list spawned agent tasks" },
+  { name: "/tasks", desc: "legacy alias for /agents status/results" },
+  { name: "/agents", desc: "unified agent activity and spawned task view" },
   { name: "/verify", desc: "auto-verify settings and reviewer selection" },
   { name: "/verify logs", desc: "browse the last full verification logs" },
   { name: "/safety", desc: "configure safety guards" },
@@ -252,6 +262,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [activityView, setActivityView] = useState<string | null>(null); // viewing activity ID
   const [activityCursor, setActivityCursor] = useState(0);
   const [activityScroll, setActivityScroll] = useState(0);
+  const [activitySearch, setActivitySearch] = useState("");
+  const [activityReturnToSelector, setActivityReturnToSelector] = useState(false);
   const [statusPanel, setStatusPanel] = useState(false);
   const [verifyPanel, setVerifyPanel] = useState<"off" | "menu" | "providers" | "models" | "effort">("off");
   const [verifyLogView, setVerifyLogView] = useState<"history" | "sections" | "detail" | null>(null);
@@ -271,6 +283,32 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [skillsCache, setSkillsCache] = useState<import("./skills.js").Skill[]>([]);
   const spawnResultsRef = React.useRef<string[]>([]);
   const persistedActivityIdsRef = React.useRef(new Set<string>());
+  const spawnActivityIdsRef = React.useRef(new Map<number, string>());
+  const spawnActivityStatusRef = React.useRef(new Map<number, SpawnedTask["status"]>());
+
+  function syncSpawnTaskActivity(task: SpawnedTask): void {
+    let activityId = spawnActivityIdsRef.current.get(task.id);
+    if (!activityId) {
+      activityId = agent.activityLog.start("agent", `spawn #${task.id}`, `${task.provider}/${task.model}`);
+      spawnActivityIdsRef.current.set(task.id, activityId);
+      agent.activityLog.log(activityId, "info", `goal: ${task.goal}`);
+    }
+
+    const previousStatus = spawnActivityStatusRef.current.get(task.id);
+    if (previousStatus !== task.status) {
+      agent.activityLog.log(activityId, "info", `status: ${task.status}`);
+      spawnActivityStatusRef.current.set(task.id, task.status);
+    }
+
+    if (task.status === "done") {
+      if (task.result) {
+        agent.activityLog.log(activityId, "response", task.result);
+      }
+      agent.activityLog.finish(activityId, `${task.provider}/${task.model} — ${task.goal}`);
+    } else if (task.status === "failed") {
+      agent.activityLog.fail(activityId, task.error ?? "spawn failed");
+    }
+  }
 
   // Interactive prompt state (safety, hooks, agent questions)
   const [activePrompt, setActivePrompt] = useState<UserPrompt | null>(null);
@@ -280,6 +318,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const promptResolveRef = React.useRef<((result: UserPromptResult) => void) | null>(null);
   const [spawnManager] = useState(() => {
     const mgr = new SpawnManager(options.cwd, (task) => {
+      syncSpawnTaskActivity(task);
       if (task.status === "done" || task.status === "failed") {
         const icon = task.status === "done" ? "✓" : "✗";
         setEntries((c) => [
@@ -303,6 +342,97 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     return mgr;
   });
   const [spawnConfigured, setSpawnConfigured] = useState(false);
+  const selectorActivities = activityView === "__select__"
+    ? getAgentBrowserActivities(getAllAgentActivities(agent), activitySearch)
+    : [];
+
+  function handleAgentCommand(line: string): void {
+    const isTasksAlias = line === "/tasks" || line.startsWith("/tasks ");
+    const rawArg = isTasksAlias ? line.slice("/tasks".length).trim() : line.slice("/agents".length).trim();
+    const arg = isTasksAlias && !rawArg ? "status" : rawArg;
+    const activities = getAllAgentActivities(agent);
+    const tasks = spawnManager.getTasks();
+    const recentActivities = activities.slice(-10);
+
+    if (arg === "results" || arg === "result") {
+      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatResults() }]);
+      return;
+    }
+
+    if (arg === "clear") {
+      const cleared = spawnManager.clearCompleted();
+      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Cleared ${cleared} completed task(s).` }]);
+      return;
+    }
+
+    if (arg === "status" || arg === "tasks") {
+      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatStatus() }]);
+      return;
+    }
+
+    if (activities.length === 0 && tasks.length === 0) {
+      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No agent activity yet." }]);
+      return;
+    }
+
+    if (!arg || arg === "browse") {
+      setEntries((c) => [...c, {
+        role: "user",
+        text: line,
+      }, {
+        role: "system",
+        text: `${formatAgentOverview(recentActivities, tasks)}\n\nAgent activity browser opened below. Type to search, use ↑↓ and Enter to view, Esc to close.`,
+      }]);
+      setActivitySearch("");
+      setActivityCursor(0);
+      setActivityScroll(0);
+      setActivityReturnToSelector(false);
+      setActivityView("__select__");
+      return;
+    }
+
+    if (arg === "list" || arg === "overview") {
+      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: formatAgentOverview(recentActivities, tasks) }]);
+      return;
+    }
+
+    if (arg.startsWith("search ")) {
+      const query = arg.slice("search ".length).trim();
+      const matches = getAgentBrowserActivities(activities, query);
+      if (!query) {
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /agents search <text>" }]);
+        return;
+      }
+      if (matches.length === 0) {
+        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `No agent activity matched: ${query}` }]);
+        return;
+      }
+      setEntries((c) => [...c, {
+        role: "user",
+        text: line,
+      }, {
+        role: "system",
+        text: `Showing ${matches.length} matching agent activit${matches.length === 1 ? "y" : "ies"} for "${query}" below. Type to refine, Backspace to edit, Enter to view, Esc to close.`,
+      }]);
+      setActivitySearch(query);
+      setActivityCursor(0);
+      setActivityScroll(0);
+      setActivityReturnToSelector(false);
+      setActivityView("__select__");
+      return;
+    }
+
+    const target = arg === "latest" ? activities[activities.length - 1] : activities.find((activity) => activity.id === arg);
+    if (!target) {
+      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Unknown agent activity: ${arg}` }]);
+      return;
+    }
+
+    setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Viewing ${target.id} (${target.name}) below. Esc to close.` }]);
+    setActivityScroll(0);
+    setActivityReturnToSelector(false);
+    setActivityView(target.id);
+  }
 
   // Pre-load skills for autocomplete
   React.useEffect(() => {
@@ -540,13 +670,38 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
     // Activity selector mode (must check BEFORE detail viewer)
     if (activityView === "__select__") {
-      const acts = agent.activityLog.getRecent(5);
-      if (key.escape) { setActivityView(null); return; }
-      if (key.downArrow) { setActivityCursor((i) => Math.min(i + 1, acts.length - 1)); return; }
-      if (key.upArrow) { setActivityCursor((i) => Math.max(i - 1, 0)); return; }
+      const acts = selectorActivities;
+      if (key.escape) {
+        setActivityView(null);
+        setActivitySearch("");
+        setActivityCursor(0);
+        return;
+      }
+      if (key.downArrow) {
+        if (acts.length > 0) setActivityCursor((i) => Math.min(i + 1, acts.length - 1));
+        return;
+      }
+      if (key.upArrow) {
+        if (acts.length > 0) setActivityCursor((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (key.backspace || key.delete) {
+        setActivitySearch((query) => query.slice(0, -1));
+        setActivityCursor(0);
+        return;
+      }
       if (key.return) {
         const selected = acts[activityCursor];
-        if (selected) { setActivityView(selected.id); setActivityScroll(0); }
+        if (selected) {
+          setActivityView(selected.id);
+          setActivityScroll(0);
+          setActivityReturnToSelector(true);
+        }
+        return;
+      }
+      if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
+        setActivitySearch((query) => query + ch);
+        setActivityCursor(0);
         return;
       }
       return;
@@ -554,7 +709,16 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
 
     // Activity detail viewer
     if (activityView && activityView !== "__select__") {
-      if (key.escape) { setActivityView(null); setActivityScroll(0); return; }
+      if (key.escape) {
+        setActivityScroll(0);
+        if (activityReturnToSelector) {
+          setActivityView("__select__");
+          setActivityReturnToSelector(false);
+        } else {
+          setActivityView(null);
+        }
+        return;
+      }
       const act = agent.activityLog.getById(activityView);
       if (act) {
         const maxScroll = Math.max(0, act.logs.length - 5);
@@ -1169,7 +1333,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       ? Math.min(agent.activityLog.getById(activityView)?.logs.length ?? 0, 5)
       : 0;
     const linesBelow = countLinesBelowInput({
-      activitySelectorCount: activityView === "__select__" ? agent.activityLog.getRecent(5).length : 0,
+      activitySelectorCount: activityView === "__select__" ? selectorActivities.length : 0,
       activityLogCount,
       runningActivityCount,
       isViewingActivitySelector: activityView === "__select__",
@@ -1306,17 +1470,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── /tasks runs immediately even while busy ──
-      if ((line === "/tasks" || line.startsWith("/tasks ")) && busyRef.current) {
-        const arg = line.slice(6).trim();
-        if (arg === "results" || arg === "result") {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatResults() }]);
-        } else if (arg === "clear") {
-          const cleared = spawnManager.clearCompleted();
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Cleared ${cleared} completed task(s).` }]);
-        } else {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatStatus() }]);
-        }
+      if (line === "/tasks" || line.startsWith("/tasks ") || line === "/agents" || line.startsWith("/agents ")) {
+        handleAgentCommand(line);
         return;
       }
 
@@ -1350,7 +1505,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /pipe <cmd>  - run command, AI analyzes output",
             "  /pipe fix <cmd> - run, fix errors, repeat until pass",
             "  /spawn <task> - spawn parallel sub-agent",
-            "  /tasks       - list spawned tasks (/tasks results, /tasks clear)",
+            "  /agents      - unified agent activity, spawn status, and details",
+            "  /tasks       - legacy alias for /agents status/results",
             "  /verify      - auto-verify settings",
             "  /verify logs - browse full verification logs",
             "  /clear     - reset chat",
@@ -1802,6 +1958,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         }
         setEntries((c) => [...c, { role: "user", text: line }]);
         setIsBusy(true);
+        const autoActivityId = agent.activityLog.start("agent", "auto", autoGoal);
+        agent.activityLog.log(autoActivityId, "info", `goal: ${autoGoal}`);
 
         try {
           const auto = new AutoAgent(
@@ -1809,11 +1967,24 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             (prompt) => agent.runTurn(prompt),
             (step) => {
               const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
+              const label = `${icon} ${step.description}${step.ms ? ` (${(step.ms / 1000).toFixed(1)}s)` : ""}`;
+              agent.activityLog.log(autoActivityId, step.status === "fail" ? "error" : "info", label);
+              if (step.result) {
+                agent.activityLog.log(autoActivityId, step.status === "fail" ? "error" : "response", step.result);
+              }
               setThinkMsg(`${icon} ${step.description}`);
             },
           );
+          auto.setToolStatusCallback((status) => {
+            if (!status.startsWith("tool: ")) return;
+            const label = status.slice(6);
+            const logType = /\(\d+\.\d+s\)/.test(label.split("\n")[0] ?? "") ? "tool-result" : "tool-call";
+            agent.activityLog.log(autoActivityId, logType, label);
+          });
 
           const result = await auto.run(autoGoal);
+          agent.activityLog.log(autoActivityId, "response", result.summary);
+          agent.activityLog.finish(autoActivityId, `${result.success ? "completed" : "incomplete"} — ${autoGoal}`);
 
           // Build output
           const lines: string[] = [`Auto: ${result.success ? "COMPLETED" : "INCOMPLETE"} (${(result.totalMs / 1000).toFixed(1)}s)\n`];
@@ -1829,6 +2000,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setTurnCount((c) => c + 1);
           setEntries((c) => [...c, { role: "assistant", text: lines.join("\n") }]);
         } catch (error) {
+          agent.activityLog.fail(autoActivityId, error instanceof Error ? error.message : String(error));
           setEntries((c) => [...c, { role: "system", text: `Auto failed: ${error instanceof Error ? error.message : String(error)}` }]);
         } finally {
           setIsBusy(false);
@@ -1874,21 +2046,6 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           { role: "user", text: line },
           { role: "system", text: `Spawned agent #${id} (${task?.provider}/${task?.model}): ${parsed.goal}` },
         ]);
-        return;
-      }
-
-      // ── tasks ──
-      if (line === "/tasks" || line.startsWith("/tasks ")) {
-        const arg = line.slice(6).trim();
-
-        if (arg === "results" || arg === "result") {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatResults() }]);
-        } else if (arg === "clear") {
-          const cleared = spawnManager.clearCompleted();
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Cleared ${cleared} completed task(s).` }]);
-        } else {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatStatus() }]);
-        }
         return;
       }
 
@@ -1993,6 +2150,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setThinkMsg(`auto: ${route.reason}`);
           const autoLines: string[] = [];
           const autoStart = Date.now();
+          const autoActivityId = agent.activityLog.start("agent", "auto", enrichedLine.slice(0, 120));
+          agent.activityLog.log(autoActivityId, "info", `goal: ${enrichedLine}`);
           const renderAutoLines = () => setStreamingText(autoLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n") + "\n");
           const auto = new AutoAgent(
             options.cwd,
@@ -2001,6 +2160,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
               const elapsed = step.ms ? ` (${(step.ms / 1000).toFixed(1)}s)` : "";
               const label = `${icon} ${step.description}${elapsed}`;
+              agent.activityLog.log(autoActivityId, step.status === "fail" ? "error" : "info", label);
+              if (step.result) {
+                agent.activityLog.log(autoActivityId, step.status === "fail" ? "error" : "response", step.result);
+              }
               setThinkMsg(label);
               if (step.status === "running") {
                 autoLines.push(label);
@@ -2021,6 +2184,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             if (status.startsWith("tool: ")) {
               const label = status.slice(6);
               const firstLine = label.split("\n")[0];
+              const logType = /\(\d+\.\d+s\)/.test(firstLine ?? "") ? "tool-result" : "tool-call";
+              agent.activityLog.log(autoActivityId, logType, label);
               setThinkMsg(firstLine);
               if (/\(\d+\.\d+s\)/.test(firstLine)) {
                 // Completed tool — update last nested tool line
@@ -2033,14 +2198,21 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               renderAutoLines();
             }
           });
-          const result = await auto.run(enrichedLine);
-          setStreamingText("");
-          setTurnCount((c) => c + 1);
-          const totalElapsed = ((Date.now() - autoStart) / 1000);
-          const cogLine = `✻ Cogitated for ${totalElapsed >= 60 ? `${Math.floor(totalElapsed / 60)}m ${Math.round(totalElapsed % 60)}s` : `${totalElapsed.toFixed(1)}s`}`;
-          const stepLog = autoLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
-          const output = result.summary || result.steps.filter((s) => s.action === "done" && s.result).map((s) => s.result).join("\n");
-          setEntries((c) => [...c, { role: "assistant", text: `${stepLog}\n\n${output}\n\n${cogLine}` }]);
+          try {
+            const result = await auto.run(enrichedLine);
+            agent.activityLog.log(autoActivityId, "response", result.summary);
+            agent.activityLog.finish(autoActivityId, `${result.success ? "completed" : "incomplete"} — ${route.reason}`);
+            setStreamingText("");
+            setTurnCount((c) => c + 1);
+            const totalElapsed = ((Date.now() - autoStart) / 1000);
+            const cogLine = `✻ Cogitated for ${totalElapsed >= 60 ? `${Math.floor(totalElapsed / 60)}m ${Math.round(totalElapsed % 60)}s` : `${totalElapsed.toFixed(1)}s`}`;
+            const stepLog = autoLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
+            const output = result.summary || result.steps.filter((s) => s.action === "done" && s.result).map((s) => s.result).join("\n");
+            setEntries((c) => [...c, { role: "assistant", text: `${stepLog}\n\n${output}\n\n${cogLine}` }]);
+          } catch (error) {
+            agent.activityLog.fail(autoActivityId, error instanceof Error ? error.message : String(error));
+            throw error;
+          }
         } else if (route.mode === "pipe") {
           const pipeStart = Date.now();
           const pipeLines: string[] = [];
@@ -2940,6 +3112,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               {act.status === "running" ? "◉" : act.status === "done" ? "✓" : "✗"} {act.name}
               {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : " ..."}
             </Text>
+            <Text color="gray">  {act.id} · {act.type}</Text>
+            {act.detail ? <Text color="gray">  {act.detail}</Text> : null}
             {visibleLogs.map((log, i) => (
               <Box key={i} flexDirection="column">
                 <Text color={log.type === "prompt" ? "cyan" : log.type === "response" ? "green" : log.type === "error" ? "red" : "gray"}>
@@ -2950,26 +3124,32 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               </Box>
             ))}
             {act.logs.length > 5 ? <Text color="gray" italic>  {activityScroll + 1}-{Math.min(activityScroll + 5, act.logs.length)} of {act.logs.length} | ↑↓ scroll</Text> : null}
-            <Text color="gray" italic>  Esc to close</Text>
+            <Text color="gray" italic>{activityReturnToSelector ? "  Esc back to results" : "  Esc to close"}</Text>
           </Box>
         );
       })() : null}
 
       {activityView === "__select__" ? (
         <Box flexDirection="column" paddingX={2}>
-          {agent.activityLog.getRecent(5).map((act, i) => (
+          <Text color="gray">
+            {activitySearch
+              ? `  Search: ${activitySearch} (${selectorActivities.length} match${selectorActivities.length === 1 ? "" : "es"})`
+              : "  Search: type to filter recent agent activity"}
+          </Text>
+          {selectorActivities.length > 0 ? selectorActivities.map((act, i) => (
             <Box key={act.id} flexDirection="row">
               <Text color={i === activityCursor ? "#ff9c73" : (act.status === "running" ? "yellow" : act.status === "done" ? "green" : "red")} bold={i === activityCursor}>
                 {i === activityCursor ? "> " : "  "}
                 {act.status === "running" ? "◉ " : act.status === "done" ? "✓ " : "✗ "}
               </Text>
               <Text color={i === activityCursor ? "#ff9c73" : "gray"}>
-                {act.name}{act.logs.length > 0 ? ` [${act.logs.length}]` : ""}
+                {act.id} · {act.name}
                 {act.finishedAt ? ` (${((act.finishedAt - act.startedAt) / 1000).toFixed(1)}s)` : "..."}
+                {getActivitySummary(act, 72) ? ` — ${getActivitySummary(act, 72)}` : ""}
               </Text>
             </Box>
-          ))}
-          <Text color="gray" italic>  ↑↓ select  Enter view  Esc back</Text>
+          )) : <Text color="gray">  No matches. Keep typing or Backspace to widen the search.</Text>}
+          <Text color="gray" italic>  Type to search  Backspace edit  ↑↓ select  Enter view  Esc close</Text>
         </Box>
       ) : null}
 
@@ -2997,7 +3177,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
                 </Box>
               );
             })}
-            {spawnTasks.length > 0 ? <Text color="gray" italic>  /tasks for details</Text> : null}
+            {running.length > 0 || spawnTasks.length > 0 ? <Text color="gray" italic>  /agents for details</Text> : null}
           </Box>
         );
       })() : null}
