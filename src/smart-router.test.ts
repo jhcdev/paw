@@ -24,6 +24,20 @@ describe("routeMessage", () => {
     });
   });
 
+  it("routes Korean strengthening requests to auto mode", () => {
+    expect(routeMessage("현재 기능에서 강화해야될 부분을 찾아서 강화해줘", false, true)).toEqual({
+      mode: "auto",
+      reason: "Complex implementation task detected",
+    });
+  });
+
+  it("routes English hardening requests to auto mode", () => {
+    expect(routeMessage("identify weak areas in the current features and harden them", false, true)).toEqual({
+      mode: "auto",
+      reason: "Complex implementation task detected",
+    });
+  });
+
   it("keeps pure shell commands on pipe mode", () => {
     expect(routeMessage("npm test", false, true)).toEqual({
       mode: "pipe",
