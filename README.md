@@ -9,17 +9,16 @@
 **The multi-provider AI coding agent for the terminal.** Use Anthropic, OpenAI Codex, Ollama, and vLLM/OpenAI-compatible endpoints — with automatic fallback, parallel sub-agents, cross-provider verification, and built-in safety. Not tied to one model, not tied to one provider. Switch with `/model` — no code changes, no lock-in.
 
 <table>
-<tr><td><b>Multi-provider, zero lock-in</b></td><td>Anthropic (Claude), Codex (ChatGPT subscription), Ollama (local/free), and vLLM/OpenAI-compatible endpoints — all available behind one CLI. Rate limit on Claude? Auto-switches to Codex. Need self-hosted inference? Point Paw at your vLLM server.</td></tr>
-<tr><td><b>Problem Classifier</b></td><td>Every prompt is instantly classified into a category (security, debugging, architecture, performance, testing, data, API, web, DevOps, refactoring, explanation). The right features activate automatically — no flags needed.</td></tr>
-<tr><td><b>Live Activity Display</b></td><td>Every tool call shown in real time: color-coded icons (Read=cyan, Write=yellow, Bash=magenta, Search=blue), elapsed time, result summary. AI intermediate responses stream live between tool calls so you always see what the agent is doing.</td></tr>
+<tr><td><b>Multi-provider, zero lock-in</b></td><td>Anthropic (Claude), Codex (ChatGPT subscription), Ollama (local/free), and vLLM/OpenAI-compatible endpoints — all behind one CLI. Rate limit on Claude? Auto-switches to Codex. Need self-hosted inference? Point Paw at your vLLM server.</td></tr>
+<tr><td><b>Smart Router + Problem Classifier</b></td><td>Just type naturally. Every prompt is instantly classified (security, debugging, architecture, performance, testing…) and routed to the optimal mode. No flags, no mode switching — it just works. English, Korean, Japanese, Chinese.</td></tr>
+<tr><td><b>Autonomous agent</b></td><td><code>/auto</code> self-drives: analyze → plan → execute → verify → fix, until done. Shows every step, tool call, and AI reasoning in real time.</td></tr>
+<tr><td><b>Parallel sub-agents</b></td><td>Spawn independent agents that work in background while you keep chatting. Each agent inherits your current model and session context.</td></tr>
 <tr><td><b>Cross-session skill learning</b></td><td>Successful auto-agent tasks are recorded across sessions. Repeated patterns auto-generate reusable skills. Bad patterns self-correct via confidence decay. Fully under user control via <code>/memory</code>.</td></tr>
-<tr><td><b>Parallel sub-agents</b></td><td>Spawn independent agents that work in background while you keep chatting. Each spawned agent inherits your current model and session context.</td></tr>
-<tr><td><b>Cross-provider verification</b></td><td>AI writes code → a <i>different</i> AI reviews it automatically. Paw also runs local checks (typecheck/build/test/lint when available), summarizes blockers inline, and keeps browsable verification logs across sessions.</td></tr>
+<tr><td><b>Cross-provider verification</b></td><td>AI writes code → a <i>different</i> AI reviews it. Paw also runs local checks (typecheck/build/test/lint), summarizes blockers inline, and keeps browsable verification logs.</td></tr>
 <tr><td><b>Agent safety</b></td><td>Every tool call is risk-classified in real-time. Destructive commands (rm -rf, mkfs, curl|sh) are blocked before they execute. High-risk operations auto-checkpoint via git stash.</td></tr>
-<tr><td><b>Cross-session memory</b></td><td>PAW.md hierarchy — global instructions, project instructions, personal notes, and auto-learned context. Memory injected on session start, survives compaction, persists across sessions.</td></tr>
-<tr><td><b>Skills + Hooks</b></td><td>7 built-in slash commands + unlimited custom skills with $ARGUMENTS, !`command` injection, and SKILL.md directories. 10 lifecycle hook events with regex matchers, JSON stdin, and exit-code blocking.</td></tr>
-<tr><td><b>AI-powered compaction</b></td><td>Conversation too long? Auto-compact summarizes old turns via AI, keeps recent messages intact, re-injects PAW.md. Manual <code>/compact [focus]</code> for targeted compression.</td></tr>
-<tr><td><b>Smart Router</b></td><td>Just type naturally — Paw auto-detects the best mode from your message. Works in English, Korean, Japanese, and Chinese.</td></tr>
+<tr><td><b>Cross-session memory</b></td><td>PAW.md hierarchy — global, project, personal notes, and auto-learned context — injected on session start, survives compaction, persists across sessions.</td></tr>
+<tr><td><b>Skills + Hooks</b></td><td>7 built-in slash commands + unlimited custom skills. 10 lifecycle hook events with regex matchers, JSON stdin, and exit-code blocking.</td></tr>
+<tr><td><b>Live Activity Display</b></td><td>Every tool call shown in real time with color-coded icons (Read=cyan, Write=yellow, Bash=magenta). AI intermediate responses stream live between tool calls.</td></tr>
 </table>
 
 > **Disclaimer:** Paw is an independent, third-party project. Not affiliated with Anthropic, OpenAI, or any AI provider.
@@ -94,37 +93,24 @@ VLLM_API_KEY=dummy
 
 ---
 
-## Live Activity Display
+## Smart Router + Problem Classifier
 
-Every tool call and AI response is shown in real time while the agent works:
+Just type naturally — Paw picks the best mode and auto-activates the right features:
 
-```
-=^.^= ◉ Executing step 2/5
+| You type | Category detected | Routed to | Auto-activated |
+|----------|-------------------|-----------|----------------|
+| `npm test` | — | `/pipe` | — |
+| `fix the JWT auth vulnerability` | Security | `/auto` + team | auto-verify ON |
+| `why does the app crash?` | Debugging | `/auto` | auto-verify ON |
+| `design a microservice architecture` | Architecture | team | team review |
+| `write unit tests for the auth module` | Testing | `/test` skill | auto-verify ON |
+| `review this code` | — | `/review` skill | — |
+| `이 코드 리뷰해줘` | — | `/review` skill | — |
+| `보안 취약점 찾아서 고쳐줘` | Security | `/auto` + team | auto-verify ON |
 
-  ✓ Read     src/cli.tsx             0.3s  ⎿  245 lines
-  ✓ Search   "thinkMsg"              0.1s  ⎿  8 results
-  ✓ Bash     npm run build           1.2s
-  ◉ Write    src/output.ts
+Supports: English, Korean, Japanese, Chinese.
 
-  I'll now update the render section to add the new...
-```
-
-| Icon | Meaning |
-|------|---------|
-| `◉` | Tool running / step in progress |
-| `✓` | Tool completed (elapsed time + result shown) |
-
-Tool colors:
-
-| Color | Tools |
-|-------|-------|
-| Cyan | `Read`, `List` |
-| Yellow | `Write`, `Update` |
-| Magenta | `Bash` |
-| Blue | `Search`, `Glob` |
-| Green | `Fetch` |
-
-AI intermediate responses stream between tool calls so you see reasoning as it happens, not just the final answer.
+Categories: `security` · `debugging` · `architecture` · `performance` · `testing` · `data` · `api` · `web` · `devops` · `refactoring` · `explanation`
 
 ---
 
@@ -158,10 +144,6 @@ Self-driving agent: analyze → plan → execute → verify → fix, until done.
 ◉ Analyzing project...
 ✓ Creating plan...
 ◉ Executing step 1/10...
-  ✓ Read    src/api/auth.ts         0.2s
-  ✓ Search  "validate"              0.1s  ⎿  3 results
-  ◉ Write   src/api/auth.ts
-
 ◉ Verifying...
 ✗ Build error found
 ◉ Fixing errors...
@@ -201,27 +183,6 @@ you  /agents                         ← check all agent progress and details
 
 ---
 
-## Smart Router + Problem Classifier
-
-Just type naturally — Paw picks the best mode and auto-activates the right features:
-
-| You type | Category detected | Routed to | Auto-activated |
-|----------|-------------------|-----------|----------------|
-| `npm test` | — | `/pipe` | — |
-| `fix the JWT auth vulnerability` | Security | `/auto` + team | auto-verify ON |
-| `why does the app crash?` | Debugging | `/auto` | auto-verify ON |
-| `design a microservice architecture` | Architecture | team | team review |
-| `write unit tests for the auth module` | Testing | `/test` skill | auto-verify ON |
-| `review this code` | — | `/review` skill | — |
-| `이 코드 리뷰해줘` | — | `/review` skill | — |
-| `보안 취약점 찾아서 고쳐줘` | Security | `/auto` + team | auto-verify ON |
-
-Supports: English, Korean, Japanese, Chinese.
-
-Categories: `security` · `debugging` · `architecture` · `performance` · `testing` · `data` · `api` · `web` · `devops` · `refactoring` · `explanation`
-
----
-
 ## Cross-Session Skill Learning
 
 Paw automatically learns from every successful `/auto` run across sessions.
@@ -246,8 +207,6 @@ Every learned task carries a **confidence score** (0–1) that self-corrects:
 Only patterns with confidence ≥ 0.4 are injected as context.
 
 ### User control — all via `/memory`
-
-Learning is integrated into the existing `/memory` command alongside PAW.md:
 
 ```bash
 /memory              # PAW.md sources + learned pattern summary + current mode
@@ -446,6 +405,38 @@ Interactive manager via `/mcp`. Supports stdio, HTTP, SSE. Tools auto-injected i
 | `/exit` | Quit |
 
 **Keyboard:** `↑↓` navigate · `Enter` select · `Tab` autocomplete · `Esc` back · `Ctrl+C` interrupt · `Ctrl+L` clear · `Ctrl+K` compact
+
+---
+
+## Live Activity Display
+
+Every tool call and AI response is shown in real time while the agent works:
+
+```
+=^.^= ◉ Executing step 2/5
+
+  ✓ Read     src/cli.tsx             0.3s  ⎿  245 lines
+  ✓ Search   "thinkMsg"              0.1s  ⎿  8 results
+  ✓ Bash     npm run build           1.2s
+  ◉ Write    src/output.ts
+
+  I'll now update the render section to add the new...
+```
+
+| Icon | Meaning |
+|------|---------|
+| `◉` | Tool running / step in progress |
+| `✓` | Tool completed (elapsed time + result shown) |
+
+| Color | Tools |
+|-------|-------|
+| Cyan | `Read`, `List` |
+| Yellow | `Write`, `Update` |
+| Magenta | `Bash` |
+| Blue | `Search`, `Glob` |
+| Green | `Fetch` |
+
+AI intermediate responses stream between tool calls so you see reasoning as it happens, not just the final answer. Works in all modes: `/auto`, `/pipe`, team, skill, and solo.
 
 ---
 
