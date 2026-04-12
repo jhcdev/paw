@@ -17,7 +17,7 @@
 <tr><td><b>Cross-provider verification</b></td><td>AI writes code → a <i>different</i> AI reviews it. Paw also runs local checks (typecheck/build/test/lint), summarizes blockers inline, and keeps browsable verification logs.</td></tr>
 <tr><td><b>Agent safety</b></td><td>Every tool call is risk-classified in real-time. Destructive commands (rm -rf, mkfs, curl|sh) are blocked before they execute. High-risk operations auto-checkpoint via git stash.</td></tr>
 <tr><td><b>Cross-session memory</b></td><td>PAW.md hierarchy — global, project, personal notes, and auto-learned context — injected on session start, survives compaction, persists across sessions.</td></tr>
-<tr><td><b>Skills + Hooks</b></td><td>7 built-in slash commands + unlimited custom skills. 10 lifecycle hook events with regex matchers, JSON stdin, and exit-code blocking.</td></tr>
+<tr><td><b>Skills + Hooks</b></td><td>7 built-in slash commands + unlimited custom skills. <code>/review</code> reviews AND fixes critical issues automatically. 10 lifecycle hook events with regex matchers, JSON stdin, and exit-code blocking.</td></tr>
 <tr><td><b>Live Activity Display</b></td><td>Every tool call shown in real time with color-coded icons (Read=cyan, Write=yellow, Bash=magenta). AI intermediate responses stream live between tool calls.</td></tr>
 </table>
 
@@ -291,7 +291,7 @@ Cross-session memory via `PAW.md` hierarchy + learned task patterns:
 
 | Built-in | Description |
 |----------|-------------|
-| `/review` | Bugs, security, best practices |
+| `/review` | Review code + **auto-fix** critical/major issues found |
 | `/refactor` | Refactoring improvements |
 | `/test` | Generate test cases |
 | `/explain` | Explain code in detail |
