@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import tty from "node:tty";
 import { promisify } from "node:util";
-import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Box, Newline, render, Text, useApp, useInput } from "ink";
 
 import type { CodingAgent, VerifyHistoryEntry } from "./agent.js";
@@ -24,6 +24,10 @@ import { loadMemory, appendMemory, formatMemoryInfo } from "./memory.js";
 import { cursorManager } from "./cursor-manager.js";
 import { Cursor, pushToKillRing, getLastKill, resetKillAccumulation } from "./cursor.js";
 import { countLinesBelowInput, measureImeColumn } from "./ime-cursor.js";
+import { applyAutocompleteSelection, shouldShowCommandSuggestions } from "./command-autocomplete.js";
+import { canSubmitComposerInput } from "./input-mode.js";
+import { createComposerBuffer, clearComposerBuffer, type ComposerBuffer } from "./composer-buffer.js";
+import { enqueuePrompt, takeNextQueuedPrompt } from "./prompt-queue.js";
 import type { VerifyResult } from "./verify.js";
 
 const execAsync = promisify(exec);
@@ -521,7 +525,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   }, [agent, entries, mode, options.cwd, sessionCreatedAt, sessionId, writerId]);
 
   const suggestions = useMemo(() => {
-    if (!input.startsWith("/") || input.includes(" ")) return [];
+    if (!shouldShowCommandSuggestions(input, cursorPos)) return [];
     const q = input.toLowerCase();
     const cmdMatches = COMMANDS.filter((c) => c.name.startsWith(q));
     const skillMatches = skillsCache
@@ -533,7 +537,29 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         desc: s.argumentHint ? `${s.description} [${s.argumentHint}]` : s.description,
       }));
     return [...cmdMatches, ...skillMatches];
-  }, [input, skillsCache]);
+  }, [cursorPos, input, skillsCache]);
+
+  const applyComposerBuffer = useCallback((buffer: ComposerBuffer) => {
+    inputRef.current = buffer.text;
+    cursorRef.current = buffer.cursorPos;
+    setInput(buffer.text);
+    setCursorPos(buffer.cursorPos);
+  }, []);
+
+  const setComposerText = useCallback((text: string, nextCursorPos?: number) => {
+    applyComposerBuffer(createComposerBuffer(text, nextCursorPos));
+  }, [applyComposerBuffer]);
+
+  const clearComposerText = useCallback(() => {
+    applyComposerBuffer(clearComposerBuffer());
+  }, [applyComposerBuffer]);
+
+  useEffect(() => {
+    setSelectedIdx((current) => {
+      if (suggestions.length === 0) return 0;
+      return Math.min(current, suggestions.length - 1);
+    });
+  }, [suggestions.length]);
 
   useInput((ch, key) => {
     // ── Interactive prompt panel ──
@@ -630,17 +656,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         // Back to saved draft
         historyIdxRef.current = -1;
         const val = historySavedRef.current;
-        inputRef.current = val;
-        cursorRef.current = [...val].length;
-        setInput(val);
-        setCursorPos([...val].length);
+        setComposerText(val);
       } else {
         historyIdxRef.current = nextSlot;
         const val = hist[nextSlot];
-        inputRef.current = val;
-        cursorRef.current = [...val].length;
-        setInput(val);
-        setCursorPos([...val].length);
+        setComposerText(val);
       }
       return;
     }
@@ -1026,7 +1046,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           setSettingsProvider(selected.name);
           if (selected.hasLogin) { setSettingsPanel("auth-method"); setSettingsCursor(0); }
           else if (selected.name === "ollama" || selected.name === "vllm") { setSettingsPanel("off"); }
-          else { setSettingsPanel("add-key"); setInput(""); }
+          else { setSettingsPanel("add-key"); clearComposerText(); }
           return;
         }
       }
@@ -1034,7 +1054,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         if (key.downArrow) { setSettingsCursor((i) => Math.min(i + 1, 1)); return; }
         if (key.upArrow) { setSettingsCursor((i) => Math.max(i - 1, 0)); return; }
         if (key.return) {
-          if (settingsCursor === 1) { setSettingsPanel("add-key"); setInput(""); }
+          if (settingsCursor === 1) { setSettingsPanel("add-key"); clearComposerText(); }
           else {
             // Login (cursor === 0)
             setSettingsPanel("off");
@@ -1046,8 +1066,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       return;
     }
     if (settingsPanel === "add-key") {
-      if (key.escape) { setSettingsPanel("list"); setInput(""); setSettingsCursor(0); return; }
-      return;
+      if (key.escape) { setSettingsPanel("list"); clearComposerText(); setSettingsCursor(0); return; }
     }
 
     // Team panel
@@ -1140,14 +1159,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (key.escape) {
         if (mcpMode === "list") { setMcpMode("off"); }
         else if (mcpMode === "remove") { setMcpMode("list"); }
-        else { setMcpMode("list"); setInput(""); }
+        else { setMcpMode("list"); clearComposerText(); }
         return;
       }
       if (mcpMode === "list") {
         if (key.downArrow) { setMcpCursor((i) => Math.min(i + 1, 2)); return; }
         if (key.upArrow) { setMcpCursor((i) => Math.max(i - 1, 0)); return; }
         if (key.return) {
-          if (mcpCursor === 0) { setMcpMode("add-name"); setInput(""); }
+          if (mcpCursor === 0) { setMcpMode("add-name"); clearComposerText(); }
           else if (mcpCursor === 1 && mcpServers.length > 0) { setMcpMode("remove"); setMcpCursor(0); }
           else { setMcpMode("off"); }
           return;
@@ -1157,8 +1176,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (mcpMode === "remove") {
         if (key.downArrow) { setMcpCursor((i) => Math.min(i + 1, mcpServers.length - 1)); return; }
         if (key.upArrow) { setMcpCursor((i) => Math.max(i - 1, 0)); return; }
+        return;
       }
-      return;
     }
 
     if (key.escape) {
@@ -1182,14 +1201,17 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
       if (key.tab) {
         const selected = suggestions[selectedIdx];
-        if (selected) setInput(selected.name);
+        if (selected) {
+          const next = applyAutocompleteSelection(selected.name);
+          setComposerText(next.input, next.cursorPos);
+        }
         setSelectedIdx(0);
         return;
       }
       if (key.return) {
         const selected = suggestions[selectedIdx];
         if (selected) {
-          setInput("");
+          clearComposerText();
           setSelectedIdx(0);
           // Directly trigger submit with the selected command
           submit(selected.name);
@@ -1199,17 +1221,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     // Enter to submit (inputRef synced synchronously — IME double-fire sees empty ref and exits)
-    if (key.return && mcpMode === "off" && modelPanel === "off" && settingsPanel === "off" && teamPanel === "off" && verifyPanel === "off" && !verifyLogView && spawnPanel === "off") {
+    if (key.return && canSubmitComposerInput({ mcpMode, modelPanel, settingsPanel, teamPanel, verifyPanel, verifyLogView: Boolean(verifyLogView), spawnPanel })) {
       const value = inputRef.current;
       if (!value.trim()) return;
       inputHistoryRef.current.push(value);
       if (inputHistoryRef.current.length > 100) inputHistoryRef.current.shift();
       historyIdxRef.current = -1;
       historySavedRef.current = "";
-      inputRef.current = "";
-      cursorRef.current = 0;
-      setInput("");
-      setCursorPos(0);
+      clearComposerText();
       submit(value);
       return;
     }
@@ -1220,24 +1239,19 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     // Ctrl+A = start of line
     if (key.ctrl && ch === "a") {
       const c = cursor.startOfLine();
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       return;
     }
     // Ctrl+E = end of line
     if (key.ctrl && ch === "e") {
       const c = cursor.endOfLine();
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       return;
     }
     // Ctrl+D = delete forward
     if (key.ctrl && ch === "d") {
       const c = cursor.del();
-      inputRef.current = c.text;
-      setInput(c.text);
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       resetKillAccumulation();
       return;
     }
@@ -1245,30 +1259,21 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     if (key.ctrl && ch === "k") {
       const { cursor: c, killed } = cursor.deleteToLineEnd();
       if (killed) pushToKillRing(killed, "append");
-      inputRef.current = c.text;
-      setInput(c.text);
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       return;
     }
     // Ctrl+U = kill to start of line
     if (key.ctrl && ch === "u") {
       const { cursor: c, killed } = cursor.deleteToLineStart();
       if (killed) pushToKillRing(killed, "prepend");
-      inputRef.current = c.text;
-      setInput(c.text);
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       return;
     }
     // Ctrl+W = kill word before cursor
     if (key.ctrl && ch === "w") {
       const { cursor: c, killed } = cursor.deleteWordBefore();
       if (killed) pushToKillRing(killed, "prepend");
-      inputRef.current = c.text;
-      setInput(c.text);
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       return;
     }
     // Ctrl+Y = yank (paste from kill ring)
@@ -1276,10 +1281,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       const text = getLastKill();
       if (text) {
         const c = cursor.insert(text);
-        inputRef.current = c.text;
-        setInput(c.text);
-        cursorRef.current = c.offset;
-        setCursorPos(c.offset);
+        setComposerText(c.text, c.offset);
       }
       resetKillAccumulation();
       return;
@@ -1288,24 +1290,19 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     // Left/Right arrow — move cursor within input (grapheme-aware)
     if (key.leftArrow && !key.ctrl && !key.meta) {
       const c = cursor.left();
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       return;
     }
     if (key.rightArrow && !key.ctrl && !key.meta) {
       const c = cursor.right();
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       return;
     }
 
     // Backspace — delete character before cursor (grapheme-aware)
     if (key.backspace || key.delete) {
       const c = cursor.backspace();
-      inputRef.current = c.text;
-      setInput(c.text);
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       resetKillAccumulation();
       return;
     }
@@ -1313,10 +1310,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     // Regular character input (including Korean/CJK) — insert at cursor
     if (ch && ch.length > 0 && !key.ctrl && !key.meta && !key.escape && ch.charCodeAt(0) >= 32) {
       const c = cursor.insert(ch);
-      inputRef.current = c.text;
-      setInput(c.text);
-      cursorRef.current = c.offset;
-      setCursorPos(c.offset);
+      setComposerText(c.text, c.offset);
       resetKillAccumulation();
       if (c.text.startsWith("/")) setSelectedIdx(0);
     }
@@ -1367,9 +1361,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const submit = useCallback(
     async (value: string, skipRender = false) => {
       const line = value.trim();
-      setInput("");
-      cursorRef.current = 0;
-      setCursorPos(0);
+      clearComposerText();
 
       // ── MCP mode submit flow (before busy/empty check) ──
       if (mcpMode === "remove") {
@@ -1427,7 +1419,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         }
         setSettingsPanel("off");
         setSettingsProvider("");
-        setInput("");
+        clearComposerText();
         return;
       }
 
@@ -1475,10 +1467,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── queue if busy (show in pending area, process merged after response) ──
+      // ── queue if busy (show in pending area, process in FIFO order once idle) ──
       if (busyRef.current) {
-        pendingRef.current.push(line);
-        setPendingDisplay((c) => [...c, line]);
+        pendingRef.current = enqueuePrompt(pendingRef.current, line);
+        setPendingDisplay((current) => enqueuePrompt(current, line));
         return;
       }
 
@@ -2392,20 +2384,16 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       } finally {
         busyRef.current = false;
         setIsBusy(false);
-        // Move pending messages to entries, then process as one merged turn
-        if (pendingRef.current.length > 0) {
-          const queued = pendingRef.current.slice();
-          const merged = queued.join("\n").trim();
-          pendingRef.current = [];
-          setPendingDisplay([]);
-          if (merged) {
-            setEntries((c) => [...c, ...queued.map((q) => ({ role: "user" as const, text: q }))]);
-            await submit(merged, true);
-          }
+        const { nextPrompt, remaining } = takeNextQueuedPrompt(pendingRef.current);
+        pendingRef.current = remaining;
+        setPendingDisplay(remaining);
+        if (nextPrompt) {
+          setEntries((c) => [...c, { role: "user" as const, text: nextPrompt }]);
+          await submit(nextPrompt, true);
         }
       }
     },
-    [agent, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion, statusPanel],
+    [agent, clearComposerText, exit, isBusy, entries, turnCount, options, mcpMode, mcpServers, mcpCursor, mcpAddName, mcpAddCmd, mode, teamPanel, teamEditRole, settingsPanel, settingsProvider, settingsCursor, modelPanel, modelPanelProvider, modelPanelModels, modelCursor, providerVersion, statusPanel],
   );
 
   const providerLabel = PROVIDER_LABELS[agent.getActiveProvider()] ?? agent.getActiveProvider();
