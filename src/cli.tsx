@@ -416,6 +416,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (!config) return null;
       return { provider: agent.getActiveProvider(), apiKey: config.apiKey, model: agent.getActiveModel(), cwd: options.cwd, baseUrl: config.baseUrl };
     });
+    mgr.setToolStatusCallback((taskId, status) => {
+      if (!status.startsWith("tool: ")) return;
+      const activityId = spawnActivityIdsRef.current.get(taskId);
+      if (!activityId) return;
+      const label = status.slice(6);
+      const firstLine = label.split("\n")[0] ?? "";
+      const logType = /\(\d+\.\d+s\)/.test(firstLine) ? "tool-result" : "tool-call";
+      agent.activityLog.log(activityId, logType, label);
+    });
     return mgr;
   });
   const [spawnConfigured, setSpawnConfigured] = useState(false);
@@ -2202,17 +2211,41 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const fullPrompt = await renderSkill(skill, skillArgs, options.cwd);
           setEntries((c) => [...c, { role: "user", text: line }]);
           setIsBusy(true);
+          setToolActivities([]);
+          setAiChunkText("");
           setThinkMsg(`running /${skillName}...`);
+          const skillStart = Date.now();
+          const skillLines: string[] = [`Skill(/${skillName})`];
+          const renderSkillLines = () => setStreamingText(skillLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n") + "\n");
+          renderSkillLines();
           try {
             if (!skill.disableModelInvocation) {
-              const result = await agent.runTurn(fullPrompt);
+              const result = await agent.runTurn(fullPrompt, (chunk) => setAiChunkText((p) => p + chunk), (status) => {
+                if (status.startsWith("tool: ")) {
+                  const label = status.slice(6);
+                  pushToolActivity(label);
+                  if (/\(\d+\.\d+s\)/.test(label.split("\n")[0] ?? "")) {
+                    for (let i = skillLines.length - 1; i >= 0; i--) {
+                      if (skillLines[i]!.startsWith("  ● ")) { skillLines[i] = `  ● ${label}`; break; }
+                    }
+                  } else {
+                    skillLines.push(`  ● ${label}`);
+                  }
+                  renderSkillLines();
+                }
+              });
+              setStreamingText("");
               setTurnCount((c) => c + 1);
-              setEntries((c) => [...c, { role: "assistant", text: result.text || "(empty response)" }]);
+              const elapsed = ((Date.now() - skillStart) / 1000).toFixed(1);
+              const skillLog = skillLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
+              setEntries((c) => [...c, { role: "assistant", text: `${skillLog}\n\n${result.text || "(empty response)"}\n\n✻ Cogitated for ${elapsed}s` }]);
             }
           } catch (error) {
             setEntries((c) => [...c, { role: "system", text: error instanceof Error ? error.message : String(error) }]);
           } finally {
             setIsBusy(false);
+            setToolActivities([]);
+            setAiChunkText("");
           }
           return;
         }

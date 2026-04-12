@@ -34,12 +34,17 @@ export class SpawnManager {
   private configs: SpawnConfig[] = [];
   private cwd: string;
   private onUpdate: (task: SpawnedTask) => void;
+  private onToolStatus?: (taskId: number, status: string) => void;
   private getDefaultConfig?: () => SpawnConfig | null;
 
   constructor(cwd: string, onUpdate: (task: SpawnedTask) => void, getDefaultConfig?: () => SpawnConfig | null) {
     this.cwd = cwd;
     this.onUpdate = onUpdate;
     this.getDefaultConfig = getDefaultConfig;
+  }
+
+  setToolStatusCallback(fn: (taskId: number, status: string) => void): void {
+    this.onToolStatus = fn;
   }
 
   /** Register available provider configs for round-robin distribution */
@@ -156,7 +161,10 @@ ${lastResponse.slice(-2000)}
 Continue executing. Use tools to read, write, and edit files.
 If ALL work is complete, say DONE and summarize.`;
 
-        const result = await provider.runTurn(prompt);
+        const onStatus = this.onToolStatus
+          ? (status: string) => this.onToolStatus!(task.id, status)
+          : undefined;
+        const result = await provider.runTurn(prompt, undefined, onStatus);
         lastResponse = result.text;
 
         if (result.text.toUpperCase().includes("DONE")) {
