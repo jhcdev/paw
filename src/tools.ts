@@ -24,15 +24,21 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
   ".avif": "image/avif",
 };
 
+function isWithinDirectory(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
 async function resolveWithinCwd(cwd: string, maybeRelative: string): Promise<string> {
+  const resolvedCwd = path.resolve(cwd);
   const resolved = path.resolve(cwd, maybeRelative);
-  if (!resolved.startsWith(path.resolve(cwd))) {
+  if (!isWithinDirectory(resolvedCwd, resolved)) {
     throw new Error(`Path escapes working directory: ${maybeRelative}`);
   }
   try {
     const real = await fs.realpath(resolved);
     const realCwd = await fs.realpath(cwd);
-    if (!real.startsWith(realCwd)) {
+    if (!isWithinDirectory(realCwd, real)) {
       throw new Error(`Symlink escapes working directory: ${maybeRelative}`);
     }
     return real;
@@ -40,7 +46,7 @@ async function resolveWithinCwd(cwd: string, maybeRelative: string): Promise<str
     // File doesn't exist yet (write_file) — check parent
     const parentReal = await fs.realpath(path.dirname(resolved));
     const realCwd = await fs.realpath(cwd);
-    if (!parentReal.startsWith(realCwd)) {
+    if (!isWithinDirectory(realCwd, parentReal)) {
       throw new Error(`Path parent escapes working directory: ${maybeRelative}`);
     }
     return resolved;

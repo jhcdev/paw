@@ -127,4 +127,18 @@ describe("PipeAgent", () => {
       expect(result).toHaveProperty("totalMs");
     });
   });
+
+  describe("watch", () => {
+    it("preserves quoted shell commands instead of splitting them on whitespace", async () => {
+      const runTurn = makeMockRunTurn(["watch analysis"]);
+      const agent = new PipeAgent("/tmp", runTurn, () => {});
+
+      const result = await agent.watch(`node -e "console.log('hello world')"`, 5000);
+
+      expect(result.mode).toBe("watch");
+      expect(result.output).toContain("hello world");
+      expect(runTurn).toHaveBeenCalled();
+      expect((runTurn.mock.calls[0]?.[0] as string) ?? "").toContain("hello world");
+    });
+  });
 });

@@ -91,6 +91,27 @@ describe("toolHandlers.read_image", () => {
   });
 });
 
+describe("workspace path isolation", () => {
+  it("blocks read_file from escaping into sibling directories with prefix-matching names", async () => {
+    const siblingWorkspace = path.join(tmpDir, "workspace-other");
+    await fs.mkdir(siblingWorkspace, { recursive: true });
+    await fs.writeFile(path.join(siblingWorkspace, "secret.txt"), "nope", "utf8");
+
+    await expect(
+      toolHandlers.read_file({ path: "../workspace-other/secret.txt" }, workspaceDir),
+    ).rejects.toThrow(/Path escapes working directory/i);
+  });
+
+  it("blocks write_file from escaping into sibling directories with prefix-matching names", async () => {
+    const siblingWorkspace = path.join(tmpDir, "workspace-other");
+    await fs.mkdir(siblingWorkspace, { recursive: true });
+
+    await expect(
+      toolHandlers.write_file({ path: "../workspace-other/created.txt", content: "nope" }, workspaceDir),
+    ).rejects.toThrow(/Path escapes working directory|Path parent escapes working directory/i);
+  });
+});
+
 describe("toolHandlers.session_search", () => {
   async function seedSession(session: SessionData): Promise<void> {
     await saveSession(session);

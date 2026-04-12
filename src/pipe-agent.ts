@@ -139,11 +139,7 @@ Explain what's still wrong and suggest manual steps to fix it.`
 
     return new Promise((resolve) => {
       let output = "";
-      const parts = command.split(/\s+/);
-      const cmd = parts[0]!;
-      const args = parts.slice(1);
-
-      const child = spawn(cmd, args, {
+      const child = spawn(command, {
         cwd: this.cwd,
         shell: true,
         stdio: ["ignore", "pipe", "pipe"],
@@ -155,6 +151,27 @@ Explain what's still wrong and suggest manual steps to fix it.`
       const timer = setTimeout(() => {
         child.kill("SIGTERM");
       }, timeout);
+
+      child.on("error", async (error) => {
+        clearTimeout(timer);
+        output = [output, error.message].filter(Boolean).join("\n");
+        this.onStatus("Analyzing...");
+
+        const analysis = await this.runTurn(
+          `Analyze the output of this watched command:
+
+Command: ${command}
+Output:
+${output.slice(-3000)}
+
+Summarize what happened. Flag any errors, warnings, or unusual behavior.`
+        );
+
+        resolve({
+          command, mode: "watch", output, analysis: analysis.text,
+          iterations: 1, fixed: false, totalMs: Date.now() - start,
+        });
+      });
 
       child.on("close", async () => {
         clearTimeout(timer);
