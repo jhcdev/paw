@@ -10,13 +10,15 @@
 
 <table>
 <tr><td><b>Multi-provider, zero lock-in</b></td><td>Anthropic (Claude), Codex (ChatGPT subscription), Ollama (local/free), and vLLM/OpenAI-compatible endpoints — all available behind one CLI. Rate limit on Claude? Auto-switches to Codex. Need self-hosted inference? Point Paw at your vLLM server.</td></tr>
-<tr><td><b>Parallel sub-agents</b></td><td>Spawn independent agents that work in background while you keep chatting. Each spawned agent inherits your current model and session context. Round-robin across providers or pin to a specific one.</td></tr>
+<tr><td><b>Problem Classifier</b></td><td>Every prompt is instantly classified into a category (security, debugging, architecture, performance, testing, data, API, web, DevOps, refactoring, explanation). The right features activate automatically — no flags needed.</td></tr>
+<tr><td><b>Cross-session skill learning</b></td><td>Successful auto-agent tasks are recorded across sessions. Repeated patterns auto-generate reusable skills. Bad patterns self-correct via confidence decay. Fully under user control via <code>/memory</code>.</td></tr>
+<tr><td><b>Parallel sub-agents</b></td><td>Spawn independent agents that work in background while you keep chatting. Each spawned agent inherits your current model and session context.</td></tr>
 <tr><td><b>Cross-provider verification</b></td><td>AI writes code → a <i>different</i> AI reviews it automatically. Paw also runs local checks (typecheck/build/test/lint when available), summarizes blockers inline, and keeps browsable verification logs across sessions.</td></tr>
 <tr><td><b>Agent safety</b></td><td>Every tool call is risk-classified in real-time. Destructive commands (rm -rf, mkfs, curl|sh) are blocked before they execute. High-risk operations auto-checkpoint via git stash.</td></tr>
 <tr><td><b>Cross-session memory</b></td><td>PAW.md hierarchy — global instructions, project instructions, personal notes, and auto-learned context. Memory injected on session start, survives compaction, persists across sessions.</td></tr>
 <tr><td><b>Skills + Hooks</b></td><td>7 built-in slash commands + unlimited custom skills with $ARGUMENTS, !`command` injection, and SKILL.md directories. 10 lifecycle hook events with regex matchers, JSON stdin, and exit-code blocking.</td></tr>
 <tr><td><b>AI-powered compaction</b></td><td>Conversation too long? Auto-compact summarizes old turns via AI, keeps recent messages intact, re-injects PAW.md. Manual <code>/compact [focus]</code> for targeted compression.</td></tr>
-<tr><td><b>Smart Router</b></td><td>Just type naturally — Paw auto-detects the best mode from your message. Works in English, Korean, Japanese, and Chinese. Shell commands → /pipe, implementation tasks → /auto, code review → /review skill.</td></tr>
+<tr><td><b>Smart Router</b></td><td>Just type naturally — Paw auto-detects the best mode from your message. Works in English, Korean, Japanese, and Chinese.</td></tr>
 </table>
 
 > **Disclaimer:** Paw is an independent, third-party project. Not affiliated with Anthropic, OpenAI, or any AI provider.
@@ -109,7 +111,7 @@ Single provider handles all messages. Switch models anytime with `/model`.
 | Tester | Test case generation | **Parallel** |
 | Optimizer | Performance improvements | Sequential |
 
-Roles auto-assigned by efficiency scores. Adapts from real usage after 3+ runs. Review → rework loop (MAJOR → recode → re-review, max 3x).
+Roles auto-assigned by efficiency scores. Review → rework loop (MAJOR → recode → re-review, max 3x).
 
 ### `/auto` — Autonomous Agent
 
@@ -139,29 +141,16 @@ you  /spawn update README            ← another agent, same or different provid
 you  /agents                         ← check all agent progress and details
 ```
 
-- Uses your current `/model` selection (follows changes automatically)
-- Receives session context (last 10 entries) — understands what you're working on
-- Completed results auto-injected into your next turn
-- Interactive panel (`/spawn`) or inline (`/spawn codex/gpt-5.4 fix lint`)
-
 ### `/agents` — Agent Activity Browser
 
-Use one command for recent agent work, spawned task status, and detail browsing.
-
 ```
-/agents         → summary + interactive browser for recent agent activity
-/agents search auth → open the browser with matching activity only
-/agents latest  → open the latest agent detail view
-/agents list    → print unified activity overview
-/agents results → print completed spawned-agent results
-/agents clear   → clear completed spawned-agent tasks
+/agents               → summary + interactive browser
+/agents search auth   → filter by keyword
+/agents latest        → latest agent detail
+/agents list          → print unified overview
+/agents results       → completed spawn results
+/agents clear         → clear completed tasks
 ```
-
-- Includes normal chat turns, `/auto`, team phases, and spawned agents
-- Spawn status/results now live under `/agents`; `/tasks` remains a legacy alias
-- Type in the browser to filter, then press `Enter` to open detail and `Esc` to return
-- Detail view shows per-activity logs and status
-- Use the activity ID from `/agents list` to reopen a specific entry
 
 ### `/pipe` — Shell Output → AI
 
@@ -171,19 +160,69 @@ Use one command for recent agent work, spawned task status, and detail browsing.
 /pipe watch npm start       → AI monitors startup output
 ```
 
-### Smart Router
+---
 
-Just type naturally — Paw picks the best mode:
+## Smart Router + Problem Classifier
 
-| You type | Routed to |
-|----------|-----------|
-| `npm test` | `/pipe` |
-| `implement JWT auth` | `/auto` |
-| `review this code` | `/review` skill |
-| `이 코드 리뷰해줘` | `/review` skill |
-| `모든 에러 수정해줘` | `/auto` |
+Just type naturally — Paw picks the best mode and auto-activates the right features:
+
+| You type | Category detected | Routed to | Auto-activated |
+|----------|-------------------|-----------|----------------|
+| `npm test` | — | `/pipe` | — |
+| `fix the JWT auth vulnerability` | Security | `/auto` + team | auto-verify ON |
+| `why does the app crash?` | Debugging | `/auto` | auto-verify ON |
+| `design a microservice architecture` | Architecture | team | team review |
+| `write unit tests for the auth module` | Testing | `/test` skill | auto-verify ON |
+| `review this code` | — | `/review` skill | — |
+| `이 코드 리뷰해줘` | — | `/review` skill | — |
+| `보안 취약점 찾아서 고쳐줘` | Security | `/auto` + team | auto-verify ON |
 
 Supports: English, Korean, Japanese, Chinese.
+
+Categories: `security` · `debugging` · `architecture` · `performance` · `testing` · `data` · `api` · `web` · `devops` · `refactoring` · `explanation`
+
+---
+
+## Cross-Session Skill Learning
+
+Paw automatically learns from every successful `/auto` run across sessions.
+
+### How it works
+
+```
+1st JWT auth fix   → recorded in ~/.paw/learned-tasks.json
+2nd JWT auth fix   → past context injected automatically
+3rd JWT auth fix   → auto-skill created: /auto-security-auth
+```
+
+Every learned task carries a **confidence score** (0–1) that self-corrects:
+
+| Event | Effect |
+|-------|--------|
+| Task succeeds | Similar patterns +0.1 confidence (cap 1.0) |
+| Task fails | Similar patterns −0.3 confidence |
+| Confidence < 0.15 | Pattern auto-pruned |
+| Auto-skill has < 2 backing patterns | Skill file auto-deleted |
+
+Only patterns with confidence ≥ 0.4 are injected as context.
+
+### Control via `/memory`
+
+Learning is integrated into `/memory` alongside PAW.md:
+
+```bash
+/memory              # PAW.md sources + learned summary + current mode
+/memory auto         # learn silently, create skills automatically (default)
+/memory ask          # learn silently, ask before creating skills
+/memory off          # disable learning and context injection entirely
+
+/memory yes          # confirm pending skill creation (ask mode)
+/memory no           # skip pending skill creation (ask mode)
+
+/memory forget <skill>           # delete skill + backing patterns
+/memory forget --category <cat>  # purge all patterns for a category
+/memory forget --all             # wipe the entire learned store
+```
 
 ---
 
@@ -191,7 +230,7 @@ Supports: English, Korean, Japanese, Chinese.
 
 ### `/verify` — Cross-Provider Verification
 
-AI generates code → a different AI reviews it. Paw also runs local verification checks when available and stores recent verification runs for later browsing.
+AI generates code → a different AI reviews it. Paw also runs local verification checks when available.
 
 ```
 ---
@@ -209,40 +248,41 @@ Verification (by codex/gpt-5.4):
 
 ```bash
 /verify        # reviewer / effort settings
-/verify logs   # browse recent verification runs, sections, and full logs
+/verify logs   # browse recent verification runs
 ```
 
 ### `/safety` — Risk Classification
 
 | Level | Examples | Action |
 |-------|---------|--------|
-| **Low** | `read_file`, `read_image`, `search_text`, `glob` | Execute immediately |
+| **Low** | `read_file`, `search_text`, `glob` | Execute immediately |
 | **Medium** | `write_file`, `edit_file`, `npm run build` | Execute immediately |
 | **High** | `rm`, `git reset`, `terraform destroy` | Blocked + git checkpoint |
 | **Critical** | `rm -rf /`, `mkfs`, `curl\|sh` | Permanently blocked |
 
-25+ dangerous patterns blocked. Symlink traversal protection. SSRF blocked. Shell injection prevented. MCP env allowlist.
+25+ dangerous patterns blocked. Symlink traversal protection. SSRF blocked. Shell injection prevented.
 
 ---
 
 ## Memory
 
-Cross-session memory via `PAW.md` hierarchy:
+Cross-session memory via `PAW.md` hierarchy + learned task patterns:
 
 | File | Scope | Shared |
 |------|-------|--------|
 | `~/.paw/PAW.md` | All projects | No |
 | `./PAW.md` or `.paw/PAW.md` | This project | Yes (commit to repo) |
 | `./PAW.local.md` | This project, personal | No (git-ignored) |
-| `~/.paw/memory/` | Auto-learned context | No (auto-managed) |
+| `~/.paw/memory/` | Auto-learned context | No |
+| `~/.paw/learned-tasks.json` | Cross-session task patterns | No |
 
-Memory injected into first prompt of each session. Survives `/compact`.
-
-```
-/memory             → view loaded sources
-/remember <note>    → save note across sessions
-/compact [focus]    → AI-powered conversation compression
-/export             → export full context as markdown
+```bash
+/memory              # view memory sources + learned patterns
+/remember <note>     # save note across sessions
+/sessions <query>    # search and summarize past sessions
+/compact [focus]     # AI-powered conversation compression
+/export              # export full context as markdown
+/export chat         # export conversation only
 ```
 
 ---
@@ -274,7 +314,7 @@ Deploy $ARGUMENTS to production.
 Current branch: !`git branch --show-current`
 ```
 
-**Directory-based** — `.paw/skills/analyze/SKILL.md` with supporting files and scripts.
+**Auto-learned skills** — after 3 similar `/auto` tasks, a global skill is auto-created in `~/.paw/skills/auto-<category>-<keyword>.md`. Manage via `/memory`.
 
 ---
 
@@ -295,16 +335,6 @@ Current branch: !`git branch --show-current`
 | `stop` | AI finishes responding | Yes |
 | `notification` | Notification sent | — |
 
-**Markdown** — `.paw/hooks/lint.md`:
-
-```yaml
----
-event: post-tool
-command: npm run lint --silent
-name: auto-lint
----
-```
-
 **JSON** — `.paw/settings.json`:
 
 ```json
@@ -318,7 +348,7 @@ name: auto-lint
 }
 ```
 
-Exit 0 = proceed (stdout → AI context). Exit 2 = block (stderr → AI feedback). Env: `PAW_EVENT`, `PAW_CWD`, `PAW_TOOL_NAME`.
+Exit 0 = proceed. Exit 2 = block. Env: `PAW_EVENT`, `PAW_CWD`, `PAW_TOOL_NAME`.
 
 ---
 
@@ -347,29 +377,29 @@ Interactive manager via `/mcp`. Supports stdio, HTTP, SSE. Tools auto-injected i
 |---------|-------------|
 | `/help` | All commands |
 | `/status` | Providers, usage, cost |
-| `/settings` | Provider management (↑↓) |
-| `/model` | Model catalog & switch (↑↓) |
-| `/team` | Team dashboard (↑↓) |
-| `/spawn` | Spawn parallel sub-agent (↑↓) |
-| `/agents` | Unified agent activity, spawn status/results |
-| `/tasks` | Legacy alias for `/agents status/results` |
+| `/settings` | Provider API key management |
+| `/model` | Model catalog & switch |
+| `/team` | Team dashboard & collaboration |
+| `/spawn` | Spawn parallel sub-agent |
+| `/agents` | Unified agent activity & spawn status |
 | `/auto <task>` | Autonomous agent mode |
-| `/pipe <cmd>` | Shell output → AI |
-| `/verify` | Cross-provider verification (↑↓) |
-| `/verify logs` | Browse recent verification history + full logs |
-| `/safety` | Safety guards |
-| `/memory` | View loaded memory |
-| `/remember <note>` | Save note across sessions |
+| `/pipe <cmd>` | Shell output → AI (fix/watch subcommands) |
+| `/verify` | Cross-provider verification settings |
+| `/verify logs` | Browse verification history |
+| `/safety` | Safety guard configuration |
+| `/memory` | PAW.md + learned patterns + learning control |
+| `/remember <note>` | Save note to memory |
+| `/sessions` | List sessions + current ID |
+| `/sessions <query>` | Search & summarize past sessions |
 | `/export` | Export full context as markdown |
+| `/export chat` | Export conversation only |
 | `/compact [focus]` | AI-powered conversation compression |
 | `/skills` | List all skills |
 | `/hooks` | List configured hooks |
 | `/ask <provider> <prompt>` | Query specific provider |
 | `/tools` | Built-in + MCP tools |
-| `/mcp` | MCP server manager (↑↓) |
+| `/mcp` | MCP server manager |
 | `/git` | Status + diff + log |
-| `/sessions` | List past sessions |
-| `/history` | Export chat to markdown |
 | `/init` | Generate CONTEXT.md |
 | `/doctor` | Diagnostics |
 | `/clear` | Reset conversation |
@@ -384,12 +414,14 @@ Interactive manager via `/mcp`. Supports stdio, HTTP, SSE. Tools auto-injected i
 | File | Purpose |
 |------|---------|
 | `~/.paw/credentials.json` | API keys (0600) |
-| `~/.paw/sessions/*.json` | Session history + recent verification history |
+| `~/.paw/sessions/*.json` | Session history + verification history |
 | `~/.paw/team-scores.json` | Team performance scores |
 | `~/.paw/PAW.md` | Global instructions |
 | `~/.paw/memory/` | Auto-learned memory |
-| `~/.paw/skills/*.md` | User-wide custom skills |
+| `~/.paw/skills/*.md` | User-wide custom skills (incl. auto-generated `auto-*`) |
 | `~/.paw/hooks/*.md` | User-wide hooks |
+| `~/.paw/learned-tasks.json` | Cross-session task patterns with confidence scores |
+| `~/.paw/learn-config.json` | Learning mode preference (auto/ask/off) |
 | `PAW.md` | Project instructions |
 | `PAW.local.md` | Personal project notes |
 | `.paw/skills/*.md` | Project skills |
@@ -405,7 +437,7 @@ Interactive manager via `/mcp`. Supports stdio, HTTP, SSE. Tools auto-injected i
 git clone https://github.com/jhcdev/paw.git
 cd paw
 npm install
-npm test              # 263 tests
+npm test              # 390 tests
 npm run build         # TypeScript → dist/
 npm link              # Install 'paw' command globally
 ```

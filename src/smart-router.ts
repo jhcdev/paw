@@ -8,12 +8,56 @@
 
 export type RouteDecision =
   | { mode: "solo" }
+  | { mode: "builtin"; command: string }
   | { mode: "auto"; reason: string }
   | { mode: "pipe"; command: string; subMode: "analyze" | "fix" }
   | { mode: "team"; reason: string }
   | { mode: "skill"; skillName: string; context: string };
 
 const AUTO_REASON = "Complex implementation task detected";
+
+function buildRecallCommand(message: string): string {
+  const trimmed = message.trim();
+  const recentOnly = [
+    /\bwhat were we working on\b/i,
+    /\bshow recent sessions\b/i,
+    /\brecent sessions\b/i,
+    /\bwhat did we do recently\b/i,
+    /우리가 뭐했지/,
+    /최근 세션/,
+    /뭘 했었지/,
+  ].some((pattern) => pattern.test(trimmed));
+
+  if (recentOnly) return "/sessions";
+
+  const cleaned = trimmed
+    .replace(/\b(do you remember|remember when|what did we do about|how did we fix|last time|in the previous session)\b/gi, " ")
+    .replace(/(지난번|예전에|전에 했던|이전에 했던|우리가 뭐했지|어떻게 고쳤지|뭘 했었지)/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+    .trim();
+
+  return cleaned ? `/sessions ${cleaned}` : "/sessions";
+}
+
+const BUILTIN_PATTERNS: { pattern: RegExp; command: string | ((message: string) => string) }[] = [
+  { pattern: /\b(what (tools|tooling) (can you use|do you have)|available tools|tool list)\b/i, command: "/tools" },
+  { pattern: /(사용 가능한 도구|툴 목록|도구 목록|쓸 수 있는 도구|사용가능한 도구)/, command: "/tools" },
+  { pattern: /\b(what skills do you have|available skills|skill list|show skills)\b/i, command: "/skills" },
+  { pattern: /(스킬 목록|사용 가능한 스킬|쓸 수 있는 스킬)/, command: "/skills" },
+  { pattern: /\b(show memory|what do you remember|memory status|loaded memory)\b/i, command: "/memory" },
+  { pattern: /(메모리 보여|기억하고 있는 것|저장된 메모리|메모리 상태)/, command: "/memory" },
+  { pattern: /\b(list sessions|show sessions|past sessions|recent sessions)\b/i, command: "/sessions" },
+  { pattern: /(세션 목록|지난 세션|최근 세션|과거 세션)/, command: "/sessions" },
+  { pattern: /\b((show|current|what(?:'s| is))\s+(paw\s+)?(status|providers?|model|usage|cost)|provider status|model status|usage status|cost status)\b/i, command: "/status" },
+  { pattern: /(상태 보여|현재 상태|provider 상태|모델 상태|사용량 상태|비용 상태)/, command: "/status" },
+  { pattern: /\b(what files changed|show git status|show diff|recent commits|git status)\b/i, command: "/git" },
+  { pattern: /(변경된 파일|깃 상태|git 상태|최근 커밋|diff 보여)/, command: "/git" },
+  { pattern: /\b(agent status|show agents|subagent status|spawn status|parallel tasks)\b/i, command: "/agents status" },
+  { pattern: /(에이전트 상태|서브에이전트 상태|spawn 상태|병렬 작업 상태)/, command: "/agents status" },
+  { pattern: /\b(remember when|what did we do|what were we working on|last time|previous session|how did we fix)\b/i, command: buildRecallCommand },
+  { pattern: /(지난번|예전에|전에 했던|우리가 뭐했지|어떻게 고쳤지|이전에 했던|뭘 했었지)/, command: buildRecallCommand },
+];
 
 // Patterns that suggest autonomous mode (EN + KO + ZH + JA)
 const AUTO_PATTERNS = [
@@ -90,14 +134,24 @@ export function routeMessage(message: string, isTeamMode: boolean, hasMultiplePr
     }
   }
 
-  // 2. Check for skill patterns
+  // 2. Check for builtin command intents
+  for (const entry of BUILTIN_PATTERNS) {
+    if (entry.pattern.test(trimmed)) {
+      return {
+        mode: "builtin",
+        command: typeof entry.command === "function" ? entry.command(trimmed) : entry.command,
+      };
+    }
+  }
+
+  // 3. Check for skill patterns
   for (const [pattern, skillName] of SKILL_PATTERNS) {
     if (pattern.test(trimmed)) {
       return { mode: "skill", skillName, context: trimmed };
     }
   }
 
-  // 3. Check for auto patterns (large tasks)
+  // 4. Check for auto patterns (large tasks)
   // Only trigger auto for genuinely complex tasks — require longer prompts
   // to avoid routing simple "작성해줘" or "create X" to slow autonomous mode
   const hasCJK = /[\u3000-\u9fff\uac00-\ud7af]/.test(trimmed);
@@ -111,7 +165,7 @@ export function routeMessage(message: string, isTeamMode: boolean, hasMultiplePr
     }
   }
 
-  // 4. Check for team patterns (if multiple providers available)
+  // 5. Check for team patterns (if multiple providers available)
   if (hasMultipleProviders) {
     for (const pattern of TEAM_PATTERNS) {
       if (pattern.test(trimmed) && trimmed.length > 20) {
@@ -120,11 +174,11 @@ export function routeMessage(message: string, isTeamMode: boolean, hasMultiplePr
     }
   }
 
-  // 5. If already in team mode, use team
+  // 6. If already in team mode, use team
   if (isTeamMode) {
     return { mode: "team", reason: "Team mode active" };
   }
 
-  // 6. Default: solo
+  // 7. Default: solo
   return { mode: "solo" };
 }

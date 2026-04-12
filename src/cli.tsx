@@ -9,13 +9,15 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } fro
 import { Box, Newline, render, Text, useApp, useInput } from "ink";
 
 import type { CodingAgent, VerifyHistoryEntry } from "./agent.js";
-import { appendToSession, saveSession, listSessions, watchSession, type SessionData, type SessionEntry } from "./session.js";
+import { appendToSession, saveSession, listSessions, searchSessions, watchSession, type SessionData, type SessionEntry } from "./session.js";
 import { formatActivityForHistory, getActivitySummary, type Activity } from "./activity-log.js";
 import { formatAgentOverview, getAgentBrowserActivities } from "./agent-activity.js";
 import { toolDefinitions } from "./tools.js";
 import type { ProviderName, UserPrompt, UserPromptResult } from "./types.js";
 import { formatModelList, getAllFilteredModels, resolveModelByIndex, detectPlan } from "./model-catalog.js";
 import { routeMessage } from "./smart-router.js";
+import { classifyProblem } from "./problem-classifier.js";
+import { recordLearnedTask, findRelevantTasks, autoCreateSkill, updateTaskOutcome, forgetLearned, getLearnedSummary, loadLearnMode, saveLearnMode, type LearnMode } from "./skill-learner.js";
 import { loadSkills, formatSkillList, renderSkill } from "./skills.js";
 import { AutoAgent } from "./auto-agent.js";
 import { PipeAgent } from "./pipe-agent.js";
@@ -24,6 +26,7 @@ import { loadMemory, appendMemory, formatMemoryInfo } from "./memory.js";
 import { cursorManager } from "./cursor-manager.js";
 import { Cursor, pushToKillRing, getLastKill, resetKillAccumulation } from "./cursor.js";
 import { countLinesBelowInput, measureImeColumn } from "./ime-cursor.js";
+import { buildRecallSummaryPrompt, formatRecentSessionsForRecall, formatSessionSearchResults } from "./session-recall.js";
 import { applyAutocompleteSelection, shouldShowCommandSuggestions } from "./command-autocomplete.js";
 import { canSubmitComposerInput } from "./input-mode.js";
 import { createComposerBuffer, clearComposerBuffer, type ComposerBuffer } from "./composer-buffer.js";
@@ -174,16 +177,14 @@ const COMMANDS: { name: string; desc: string }[] = [
   { name: "/tools", desc: "available tools" },
   { name: "/mcp", desc: "MCP server manager" },
   { name: "/git", desc: "git status, diff, log" },
-  { name: "/history", desc: "export conversation" },
-  { name: "/export", desc: "export full context as markdown" },
+  { name: "/export", desc: "export full context (/export chat = conversation only)" },
   { name: "/compact", desc: "compress conversation" },
   { name: "/init", desc: "generate project context" },
   { name: "/doctor", desc: "diagnostics" },
-  { name: "/sessions", desc: "list past sessions" },
-  { name: "/session", desc: "current session ID" },
+  { name: "/sessions", desc: "list past sessions + current ID (/sessions <query> = search)" },
   { name: "/skills", desc: "list available skills" },
   { name: "/hooks", desc: "list configured hooks" },
-  { name: "/memory", desc: "show loaded memory & instructions" },
+  { name: "/memory", desc: "memory: PAW.md + learned patterns (auto|ask|off|forget|yes|no)" },
   { name: "/clear", desc: "reset chat" },
   { name: "/exit", desc: "quit" },
   { name: "/auto", desc: "autonomous agent mode" },
@@ -286,6 +287,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [verifyCursor, setVerifyCursor] = useState(0);
   const [skillsCache, setSkillsCache] = useState<import("./skills.js").Skill[]>([]);
   const spawnResultsRef = React.useRef<string[]>([]);
+  const [learnMode, setLearnMode] = useState<LearnMode>("auto");
+  const pendingSkillRef = React.useRef<{ name: string; goal: string; category: string; matchCount: number } | null>(null);
   const persistedActivityIdsRef = React.useRef(new Set<string>());
   const spawnActivityIdsRef = React.useRef(new Map<number, string>());
   const spawnActivityStatusRef = React.useRef(new Map<number, SpawnedTask["status"]>());
@@ -350,7 +353,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     ? getAgentBrowserActivities(getAllAgentActivities(agent), activitySearch)
     : [];
 
-  function handleAgentCommand(line: string): void {
+  function handleAgentCommand(line: string, includeUser = true): void {
     const isTasksAlias = line === "/tasks" || line.startsWith("/tasks ");
     const rawArg = isTasksAlias ? line.slice("/tasks".length).trim() : line.slice("/agents".length).trim();
     const arg = isTasksAlias && !rawArg ? "status" : rawArg;
@@ -359,31 +362,28 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     const recentActivities = activities.slice(-10);
 
     if (arg === "results" || arg === "result") {
-      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatResults() }]);
+      setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), { role: "system", text: spawnManager.formatResults() }]);
       return;
     }
 
     if (arg === "clear") {
       const cleared = spawnManager.clearCompleted();
-      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Cleared ${cleared} completed task(s).` }]);
+      setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), { role: "system", text: `Cleared ${cleared} completed task(s).` }]);
       return;
     }
 
     if (arg === "status" || arg === "tasks") {
-      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: spawnManager.formatStatus() }]);
+      setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), { role: "system", text: spawnManager.formatStatus() }]);
       return;
     }
 
     if (activities.length === 0 && tasks.length === 0) {
-      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No agent activity yet." }]);
+      setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), { role: "system", text: "No agent activity yet." }]);
       return;
     }
 
     if (!arg || arg === "browse") {
-      setEntries((c) => [...c, {
-        role: "user",
-        text: line,
-      }, {
+      setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), {
         role: "system",
         text: `${formatAgentOverview(recentActivities, tasks)}\n\nAgent activity browser opened below. Type to search, use ↑↓ and Enter to view, Esc to close.`,
       }]);
@@ -396,7 +396,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
     }
 
     if (arg === "list" || arg === "overview") {
-      setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: formatAgentOverview(recentActivities, tasks) }]);
+      setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), { role: "system", text: formatAgentOverview(recentActivities, tasks) }]);
       return;
     }
 
@@ -404,17 +404,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       const query = arg.slice("search ".length).trim();
       const matches = getAgentBrowserActivities(activities, query);
       if (!query) {
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Usage: /agents search <text>" }]);
+        setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), { role: "system", text: "Usage: /agents search <text>" }]);
         return;
       }
       if (matches.length === 0) {
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `No agent activity matched: ${query}` }]);
+        setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), { role: "system", text: `No agent activity matched: ${query}` }]);
         return;
       }
-      setEntries((c) => [...c, {
-        role: "user",
-        text: line,
-      }, {
+      setEntries((c) => [...c, ...(includeUser ? [{ role: "user" as const, text: line }] : []), {
         role: "system",
         text: `Showing ${matches.length} matching agent activit${matches.length === 1 ? "y" : "ies"} for "${query}" below. Type to refine, Backspace to edit, Enter to view, Esc to close.`,
       }]);
@@ -442,6 +439,11 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   React.useEffect(() => {
     loadSkills(options.cwd).then(setSkillsCache).catch(() => {});
   }, [options.cwd]);
+
+  // Load persisted learn mode on mount
+  React.useEffect(() => {
+    loadLearnMode().then(setLearnMode).catch(() => {});
+  }, []);
 
   // All input handled in useInput below (no separate useStdin)
 
@@ -1463,7 +1465,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
       if (line === "/tasks" || line.startsWith("/tasks ") || line === "/agents" || line.startsWith("/agents ")) {
-        handleAgentCommand(line);
+        handleAgentCommand(line, !skipRender);
         return;
       }
 
@@ -1493,6 +1495,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             "  /doctor    - diagnostics",
             "  /skills   - list available skills",
             "  /hooks    - list configured hooks",
+            "  /recall <query> - search and summarize past sessions",
             "  /auto <task> - autonomous agent (plan→execute→verify→fix loop)",
             "  /pipe <cmd>  - run command, AI analyzes output",
             "  /pipe fix <cmd> - run, fix errors, repeat until pass",
@@ -1525,7 +1528,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           ? "\n\nMCP Tools:\n" + mcpTools.map((t) => `  ${t.name} - ${t.description}`).join("\n")
           : "";
         setEntries((c) => [...c,
-          { role: "user", text: line },
+          ...(skipRender ? [] : [{ role: "user" as const, text: line }]),
           { role: "system", text: `Built-in Tools:\n${builtIn}${mcpSection}` },
         ]);
         return;
@@ -1585,35 +1588,32 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const { stdout: log } = await execAsync("git log --oneline -5", { cwd: options.cwd });
           if (log.trim()) parts.push(`\nRecent commits:\n${log.trim()}`);
         } catch {}
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: parts.join("\n") }]);
+        setEntries((c) => [...c, ...(skipRender ? [] : [{ role: "user" as const, text: line }]), { role: "system", text: parts.join("\n") }]);
         return;
       }
 
-      // ── history ──
-      if (line === "/history") {
-        const exportPath = path.join(options.cwd, `chat-${Date.now()}.md`);
-        const content = entries.map((e) => {
-          if (e.role === "user") return `**You:** ${e.text}`;
-          if (e.role === "assistant") return `**Assistant:** ${e.text}`;
-          return `*${e.text}*`;
-        }).join("\n\n");
-        try {
-          await fsPromises.writeFile(exportPath, content, "utf8");
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: `Exported to ${path.basename(exportPath)}` },
-          ]);
-        } catch (err) {
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: `Export failed: ${err instanceof Error ? err.message : String(err)}` },
-          ]);
+      // ── export (full context or chat-only) ──
+      // /export        → full structured markdown (memory + conversation + agents + usage)
+      // /export chat   → conversation only  (replaces legacy /history)
+      // /history       → alias for /export chat
+      if (line === "/export" || line === "/history" || line.startsWith("/export ")) {
+        const arg = line === "/history" ? "chat" : line.slice("/export".length).trim();
+        if (arg === "chat") {
+          const exportPath = path.join(options.cwd, `chat-${Date.now()}.md`);
+          const content = entries.map((e) => {
+            if (e.role === "user") return `**You:** ${e.text}`;
+            if (e.role === "assistant") return `**Assistant:** ${e.text}`;
+            return `*${e.text}*`;
+          }).join("\n\n");
+          try {
+            await fsPromises.writeFile(exportPath, content, "utf8");
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Exported to ${path.basename(exportPath)}` }]);
+          } catch (err) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Export failed: ${err instanceof Error ? err.message : String(err)}` }]);
+          }
+          return;
         }
-        return;
-      }
-
-      // ── export (structured context summary as markdown) ──
-      if (line === "/export") {
+        // Full export
         const exportPath = path.join(options.cwd, `paw-export-${Date.now()}.md`);
         const { sources } = await loadMemory(options.cwd);
         const sections: string[] = [
@@ -1621,46 +1621,27 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           `> ${new Date().toISOString()} | ${agent.getActiveProvider()}/${agent.getActiveModel()} | ${entries.length} entries`,
           "",
         ];
-
-        // Memory sources
         if (sources.length > 0) {
           sections.push("## Memory & Instructions\n");
-          for (const s of sources) {
-            sections.push(`### ${s.level} (${s.path})\n\n${s.content}\n`);
-          }
+          for (const s of sources) sections.push(`### ${s.level} (${s.path})\n\n${s.content}\n`);
         }
-
-        // Conversation
         sections.push("## Conversation\n");
         for (const e of entries) {
           if (e.role === "user") sections.push(`### > ${e.text}\n`);
           else if (e.role === "assistant") sections.push(`${e.text}\n`);
           else sections.push(`*${e.text}*\n`);
         }
-
-        // Spawn results
         const completed = spawnManager.getCompletedTasks();
         if (completed.length > 0) {
           sections.push("## Sub-Agent Results\n");
-          for (const t of completed) {
-            sections.push(`### Agent #${t.id}: ${t.goal}\n\n**Provider:** ${t.provider}/${t.model} | **Status:** ${t.status}\n\n${t.result ?? t.error ?? "(no output)"}\n`);
-          }
+          for (const t of completed) sections.push(`### Agent #${t.id}: ${t.goal}\n\n**Provider:** ${t.provider}/${t.model} | **Status:** ${t.status}\n\n${t.result ?? t.error ?? "(no output)"}\n`);
         }
-
-        // Usage
         sections.push(`## Usage\n\n${agent.tracker.formatReport()}\n`);
-
         try {
           await fsPromises.writeFile(exportPath, sections.join("\n"), "utf8");
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: `Exported to ${path.basename(exportPath)}` },
-          ]);
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Exported to ${path.basename(exportPath)}\n\nTip: /export chat for conversation-only export` }]);
         } catch (err) {
-          setEntries((c) => [...c,
-            { role: "user", text: line },
-            { role: "system", text: `Export failed: ${err instanceof Error ? err.message : String(err)}` },
-          ]);
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Export failed: ${err instanceof Error ? err.message : String(err)}` }]);
         }
         return;
       }
@@ -1765,20 +1746,50 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
-      // ── sessions ──
-      if (line === "/sessions") {
-        const sessions = await listSessions(10);
-        if (sessions.length === 0) {
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "No saved sessions." }]);
-        } else {
-          const list = sessions.map((s) => `  ${s.id === sessionId ? "* " : "  "}${s.id}  ${s.provider}/${s.model}  ${s.turns} turns  ${s.preview}`).join("\n");
-          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Sessions:\n${list}\n\nResume: paw --session <id>` }]);
-        }
-        return;
-      }
+      // ── sessions (list + current ID + search/recall) ──
+      // /sessions           → list past sessions with current session marked
+      // /sessions <query>   → search past sessions and summarize (replaces /recall)
+      // /session            → alias (shows same output as /sessions)
+      // /recall <query>     → alias for /sessions <query>
+      if (line === "/sessions" || line === "/session" || line.startsWith("/sessions ") || line === "/recall" || line.startsWith("/recall ")) {
+        const query = line.startsWith("/sessions ") ? line.slice("/sessions ".length).trim()
+          : line.startsWith("/recall ") ? line.slice("/recall ".length).trim()
+          : "";
 
-      if (line === "/session") {
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Current session: ${sessionId}` }]);
+        if (query) {
+          // Search mode (formerly /recall <query>)
+          if (!skipRender) setEntries((c) => [...c, { role: "user" as const, text: line }]);
+          setIsBusy(true);
+          setThinkMsg("searching past sessions...");
+          try {
+            const matches = await searchSessions(query, 3, sessionId);
+            if (matches.length === 0) {
+              setEntries((c) => [...c, { role: "system", text: `No past sessions matched: ${query}` }]);
+            } else {
+              let recallText = formatSessionSearchResults(matches);
+              try {
+                const summary = await agent.getMulti().ask(agent.getActiveProvider(), buildRecallSummaryPrompt(query, matches), agent.getActiveModel());
+                if (summary.text.trim()) recallText = summary.text.trim();
+              } catch {}
+              setEntries((c) => [...c, { role: "assistant", text: recallText }]);
+            }
+          } catch (err) {
+            setEntries((c) => [...c, { role: "system", text: `Search failed: ${err instanceof Error ? err.message : String(err)}` }]);
+          } finally {
+            setIsBusy(false);
+          }
+          return;
+        }
+
+        // List mode: show current session + history
+        const sessions = await listSessions(10);
+        const currentLine = `Current: ${sessionId}`;
+        if (sessions.length === 0) {
+          setEntries((c) => [...c, ...(skipRender ? [] : [{ role: "user" as const, text: line }]), { role: "system", text: `${currentLine}\n\nNo other saved sessions.` }]);
+        } else {
+          const list = sessions.map((s) => `  ${s.id === sessionId ? "▶ " : "  "}${s.id}  ${s.provider}/${s.model}  ${s.turns} turns  ${s.preview}`).join("\n");
+          setEntries((c) => [...c, ...(skipRender ? [] : [{ role: "user" as const, text: line }]), { role: "system", text: `${currentLine}\n\nSessions:\n${list}\n\nResume: paw --session <id>   Search: /sessions <query>` }]);
+        }
         return;
       }
 
@@ -1861,7 +1872,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       // ── skills ──
       if (line === "/skills" || line === "/skill") {
         const skills = await loadSkills(options.cwd);
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Skills:\n${formatSkillList(skills)}\n\nUsage: /<skill-name> [context]` }]);
+        setEntries((c) => [...c, ...(skipRender ? [] : [{ role: "user" as const, text: line }]), { role: "system", text: `Skills:\n${formatSkillList(skills)}\n\nUsage: /<skill-name> [context]` }]);
         return;
       }
 
@@ -1884,10 +1895,75 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       }
 
 
-      // ── memory ──
-      if (line === "/memory") {
+      // ── memory (PAW.md + cross-session learned patterns) ──
+      if (line === "/memory" || line.startsWith("/memory ")) {
+        const arg = line.slice("/memory".length).trim();
+
+        // Pending skill confirmation (ask mode) — /memory yes|no
+        if ((arg === "y" || arg === "yes") && pendingSkillRef.current) {
+          const pending = pendingSkillRef.current;
+          pendingSkillRef.current = null;
+          try {
+            const skillPath = await autoCreateSkill(pending.name, pending.goal, pending.category as import("./problem-classifier.js").ProblemCategory);
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Skill created: /${pending.name}\nFile: ${skillPath}` }]);
+          } catch (err) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Failed: ${err instanceof Error ? err.message : String(err)}` }]);
+          }
+          return;
+        }
+        if ((arg === "n" || arg === "no") && pendingSkillRef.current) {
+          pendingSkillRef.current = null;
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: "Skill creation skipped." }]);
+          return;
+        }
+
+        // Learning mode change — /memory auto|ask|off
+        if (arg === "auto" || arg === "ask" || arg === "off") {
+          const newMode = arg as LearnMode;
+          setLearnMode(newMode);
+          try { await saveLearnMode(newMode); } catch {}
+          const desc: Record<LearnMode, string> = {
+            auto: "learns silently, skills auto-created at threshold",
+            ask:  "learns silently, asks before creating skills",
+            off:  "learning and context injection disabled",
+          };
+          setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Learning → ${newMode.toUpperCase()}: ${desc[newMode]}` }]);
+          return;
+        }
+
+        // Forget patterns — /memory forget <spec>
+        if (arg.startsWith("forget")) {
+          const spec = arg.slice("forget".length).trim();
+          if (!spec) {
+            const learnSummary = await getLearnedSummary();
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `${learnSummary}\n\nUsage:\n  /memory forget <skill>          — delete skill + patterns\n  /memory forget --category <cat> — purge a category\n  /memory forget --all            — wipe everything` }]);
+            return;
+          }
+          try {
+            const result = await forgetLearned(spec);
+            const msgs: string[] = [];
+            if (result.tasksRemoved > 0) msgs.push(`Removed ${result.tasksRemoved} pattern${result.tasksRemoved > 1 ? "s" : ""}`);
+            if (result.skillsDeleted.length > 0) msgs.push(`Deleted: ${result.skillsDeleted.map((s) => `/${s}`).join(", ")}`);
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: msgs.length ? msgs.join("\n") : "Nothing matched." }]);
+          } catch (err) {
+            setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Error: ${err instanceof Error ? err.message : String(err)}` }]);
+          }
+          return;
+        }
+
+        // Default: show PAW.md sources + learned summary
         const { sources } = await loadMemory(options.cwd);
-        setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: formatMemoryInfo(sources) }]);
+        const learnSummary = await getLearnedSummary().catch(() => "");
+        const pending = pendingSkillRef.current;
+        const learnBlock = [
+          "",
+          `── Learned Patterns (mode: ${learnMode.toUpperCase()}) ──`,
+          learnSummary,
+          pending ? `\nPending skill: /${pending.name} — /memory yes  or  /memory no` : "",
+          "",
+          "Settings: /memory auto | ask | off    Forget: /memory forget <spec>",
+        ].filter(Boolean).join("\n");
+        setEntries((c) => [...c, ...(skipRender ? [] : [{ role: "user" as const, text: line }]), { role: "system", text: formatMemoryInfo(sources) + learnBlock }]);
         return;
       }
       if (line.startsWith("/remember ")) {
@@ -2041,6 +2117,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+
       // ── unknown command / skill ──
       // Exclude file paths like /home/dev/... — commands are /word with no nested slashes
       if (line.startsWith("/") && !line.slice(1).split(/\s+/)[0]!.includes("/")) {
@@ -2066,6 +2143,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           }
           return;
         }
+      }
+
       // ── verify ──
       if (line === "/verify" || line.startsWith("/verify ")) {
         const arg = line.slice("/verify".length).trim();
@@ -2117,6 +2196,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         return;
       }
 
+      if (line.startsWith("/") && !line.slice(1).split(/\s+/)[0]!.includes("/")) {
         setEntries((c) => [...c, { role: "user", text: line }, { role: "system", text: `Unknown command: ${line}\nType /help for commands or /skills for skills.` }]);
         return;
       }
@@ -2136,9 +2216,55 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         }
 
         const hasMulti = agent.getMulti().getRegistered().length > 1;
-        const route = routeMessage(line, mode === "team", hasMulti);
+        let route = routeMessage(line, mode === "team", hasMulti);
 
-        if (route.mode === "auto") {
+        // ── Hermes-style: classify problem category & auto-activate features ──
+        const cls = classifyProblem(line);
+        const isConf = cls.confidence >= 0.45 && cls.category !== "general";
+        if (isConf && route.mode !== "builtin" && route.mode !== "pipe") {
+          const act = cls.activation;
+
+          // Auto-enable cross-provider verify for security/debugging/testing/etc
+          if (act.autoVerify && !agent.isVerifyEnabled()) {
+            agent.enableVerify(true);
+            setEntries((c) => [...c, { role: "system", text: `[${act.badge}] Auto-verify enabled` }]);
+          }
+
+          // Upgrade solo → team for architecture/security when multi-provider is ready
+          if (act.preferTeam && hasMulti && agent.getTeam().isReady() && route.mode === "solo") {
+            route = { mode: "team", reason: `[${act.badge}] team review activated` };
+            setEntries((c) => [...c, { role: "system", text: `[${act.badge}] Routing to team review` }]);
+          }
+
+          // Upgrade solo → /auto for debugging (autonomous diagnosis)
+          if (act.forceAuto && route.mode === "solo" && line.length > 20) {
+            route = { mode: "auto", reason: `[${act.badge}] autonomous diagnosis` };
+          }
+
+          // Inject category context hint into the prompt (model sees it, user doesn't)
+          if (act.contextHint) {
+            enrichedLine = `${enrichedLine}\n\n[${act.badge} hint: ${act.contextHint}]`;
+          }
+
+          // Cross-session memory: inject relevant past task summaries as context
+          if (learnMode !== "off") {
+            try {
+              const pastTasks = await findRelevantTasks(line, cls.category);
+              if (pastTasks.length > 0) {
+                const ctx = pastTasks
+                  .map((t) => `- [${t.category}] ${t.goal.slice(0, 80)}: ${t.summary.slice(0, 150)}`)
+                  .join("\n");
+                enrichedLine = `${enrichedLine}\n\n[Cross-session context (${pastTasks.length} relevant past task${pastTasks.length > 1 ? "s" : ""}):\n${ctx}]`;
+              }
+            } catch {
+              // Cross-session memory is best-effort — never block the main flow
+            }
+          }
+        }
+
+        if (route.mode === "builtin") {
+          await submit(route.command, true);
+        } else if (route.mode === "auto") {
           setThinkMsg(`auto: ${route.reason}`);
           const autoLines: string[] = [];
           const autoStart = Date.now();
@@ -2200,6 +2326,36 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             const cogLine = `✻ Cogitated for ${totalElapsed >= 60 ? `${Math.floor(totalElapsed / 60)}m ${Math.round(totalElapsed % 60)}s` : `${totalElapsed.toFixed(1)}s`}`;
             const stepLog = autoLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n");
             const output = result.summary || result.steps.filter((s) => s.action === "done" && s.result).map((s) => s.result).join("\n");
+            if (result.success) {
+              if (learnMode !== "off") {
+                // Cross-session learning: persist task, handle skill creation by mode
+                try {
+                  const learned = await recordLearnedTask(line, result.summary, cls.category, options.cwd);
+                  if (learned.autoSkillName) {
+                    if (learnMode === "auto") {
+                      await autoCreateSkill(learned.autoSkillName, line, cls.category);
+                      setEntries((c) => [...c, { role: "system", text: `Auto-learned: /${learned.autoSkillName} (${learned.matchCount} similar ${cls.category} tasks — global skill created)` }]);
+                    } else {
+                      // ask mode: queue for user confirmation
+                      pendingSkillRef.current = { name: learned.autoSkillName, goal: line, category: cls.category, matchCount: learned.matchCount };
+                      setEntries((c) => [...c, { role: "system", text: `Pattern recognized: /${learned.autoSkillName} (${learned.matchCount}x ${cls.category})\nCreate skill? → /memory yes  or  /memory no` }]);
+                    }
+                  }
+                } catch {}
+                // Upvote similar past patterns
+                try { await updateTaskOutcome(line, cls.category, "success"); } catch {}
+              }
+            } else {
+              if (learnMode !== "off") {
+                // Downvote similar past patterns so bad advice doesn't repeat
+                try {
+                  const deleted = await updateTaskOutcome(line, cls.category, "failure");
+                  if (deleted.length > 0) {
+                    setEntries((c) => [...c, { role: "system", text: `Low-confidence patterns pruned: ${deleted.map((s) => `/${s}`).join(", ")}` }]);
+                  }
+                } catch {}
+              }
+            }
             setEntries((c) => [...c, { role: "assistant", text: `${stepLog}\n\n${output}\n\n${cogLine}` }]);
           } catch (error) {
             agent.activityLog.fail(autoActivityId, error instanceof Error ? error.message : String(error));

@@ -2,6 +2,8 @@ import { exec, execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { listSessions, searchSessions } from "./session.js";
+import { formatRecentSessionsForRecall, formatSessionSearchResults } from "./session-recall.js";
 import type { ToolDefinition, ToolHandler, ToolResult } from "./types.js";
 import { classifyRisk, createCheckpoint, type SafetyConfig } from "./safety.js";
 
@@ -261,6 +263,19 @@ async function webFetch(input: Record<string, unknown>, _cwd: string): Promise<T
   }
 }
 
+async function sessionSearch(input: Record<string, unknown>, _cwd: string): Promise<ToolResult> {
+  const query = typeof input.query === "string" ? input.query.trim() : "";
+  const limit = typeof input.limit === "number" ? Math.max(1, Math.min(10, Math.floor(input.limit))) : 5;
+
+  if (!query) {
+    const sessions = await listSessions(limit);
+    return { content: formatRecentSessionsForRecall(sessions) };
+  }
+
+  const matches = await searchSessions(query, limit);
+  return { content: matches.length > 0 ? formatSessionSearchResults(matches) : `No past sessions matched: ${query}` };
+}
+
 export const toolDefinitions: ToolDefinition[] = [
   {
     name: "list_files",
@@ -356,6 +371,17 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: "session_search",
+    description: "Search saved past sessions or list recent sessions for cross-session recall.",
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Optional search query. Omit to list recent sessions." },
+        limit: { type: "number", description: "Maximum number of sessions to return (default: 5)." },
+      },
+    },
+  },
+  {
     name: "web_fetch",
     description: "Fetch content from a URL.",
     input_schema: {
@@ -377,6 +403,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
   search_text: searchText,
   run_shell: runShell,
   glob: globFiles,
+  session_search: sessionSearch,
   web_fetch: webFetch,
 };
 

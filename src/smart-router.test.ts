@@ -32,6 +32,24 @@ describe("routeMessage", () => {
     });
   });
 
+  it("routes recall-style prompts to the sessions builtin", () => {
+    expect(routeMessage("지난번 auth 버그 어떻게 고쳤지?", false, true)).toEqual({
+      mode: "builtin",
+      command: "/sessions auth 버그",
+    });
+  });
+
+  it("routes tool and skill catalog prompts to builtins", () => {
+    expect(routeMessage("what tools can you use?", false, true)).toEqual({
+      mode: "builtin",
+      command: "/tools",
+    });
+    expect(routeMessage("스킬 목록 보여줘", false, true)).toEqual({
+      mode: "builtin",
+      command: "/skills",
+    });
+  });
+
   it("keeps casual short prompts on solo mode", () => {
     expect(routeMessage("안녕", false, true)).toEqual({ mode: "solo" });
   });
