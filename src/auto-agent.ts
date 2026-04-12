@@ -37,13 +37,14 @@ export type AutoResult = {
  */
 export class AutoAgent {
   private cwd: string;
-  private runTurn: (prompt: string, onStatus?: (status: string) => void) => Promise<{ text: string }>;
+  private runTurn: (prompt: string, onChunk?: (chunk: string) => void, onStatus?: (status: string) => void) => Promise<{ text: string }>;
   private onStep: (step: AutoStep) => void;
   private onToolStatus: ((status: string) => void) | null = null;
+  private onChunk: ((chunk: string) => void) | null = null;
 
   constructor(
     cwd: string,
-    runTurn: (prompt: string, onStatus?: (status: string) => void) => Promise<{ text: string }>,
+    runTurn: (prompt: string, onChunk?: (chunk: string) => void, onStatus?: (status: string) => void) => Promise<{ text: string }>,
     onStep: (step: AutoStep) => void,
   ) {
     this.cwd = cwd;
@@ -55,8 +56,12 @@ export class AutoAgent {
     this.onToolStatus = fn;
   }
 
+  setChunkCallback(fn: (chunk: string) => void): void {
+    this.onChunk = fn;
+  }
+
   private runTurn_(prompt: string): Promise<{ text: string }> {
-    return this.runTurn(prompt, this.onToolStatus ?? undefined);
+    return this.runTurn(prompt, this.onChunk ?? undefined, this.onToolStatus ?? undefined);
   }
 
   async run(goal: string, maxIterations = 10): Promise<AutoResult> {

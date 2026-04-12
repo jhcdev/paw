@@ -90,6 +90,54 @@ function randomCatMood(): string {
   return CAT_MOODS[Math.floor(Math.random() * CAT_MOODS.length)]!;
 }
 
+// ── Tool Activity Display ─────────────────────────────────────────────────────
+
+type ToolActivity = {
+  id: number;
+  name: string;
+  detail: string;
+  done: boolean;
+  elapsed?: string;
+  result?: string;
+};
+
+function getToolColor(name: string): string {
+  switch (name) {
+    case "Read": case "List": return "cyan";
+    case "Write": case "Update": return "yellow";
+    case "Bash": return "magenta";
+    case "Search": case "Glob": return "blue";
+    case "Fetch": return "green";
+    default: return "white";
+  }
+}
+
+function parseToolCore(core: string): { name: string; detail: string } {
+  const parenMatch = core.match(/^(\w+)\((.+?)\)(.*?)$/s);
+  if (parenMatch) {
+    const suffix = parenMatch[3]!.trim();
+    return { name: parenMatch[1]!, detail: suffix ? `${parenMatch[2]}  ${suffix}` : parenMatch[2]! };
+  }
+  const spaceMatch = core.match(/^(\w+)\s+(.+)$/);
+  if (spaceMatch) return { name: spaceMatch[1]!, detail: spaceMatch[2]! };
+  return { name: core, detail: "" };
+}
+
+function parseToolActivity(label: string): Omit<ToolActivity, "id"> {
+  const firstLine = label.split("\n")[0]!;
+  const resultLines = label.split("\n").slice(1)
+    .map((l) => l.replace(/^\s*⎿\s*/, "").trim()).filter(Boolean);
+  const result = resultLines.slice(0, 2).join(" · ").slice(0, 70) || undefined;
+
+  const doneMatch = firstLine.match(/^(.+?)\s+\((\d+\.\d+)s\)$/);
+  if (doneMatch) {
+    const { name, detail } = parseToolCore(doneMatch[1]!);
+    return { name, detail, done: true, elapsed: `${doneMatch[2]}s`, result };
+  }
+  const { name, detail } = parseToolCore(firstLine);
+  return { name, detail, done: false };
+}
+
 function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
@@ -270,6 +318,28 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
   const [activitySearch, setActivitySearch] = useState("");
   const [activityReturnToSelector, setActivityReturnToSelector] = useState(false);
   const [statusPanel, setStatusPanel] = useState(false);
+  const [toolActivities, setToolActivities] = useState<ToolActivity[]>([]);
+  const [aiChunkText, setAiChunkText] = useState("");
+  const toolActivityIdRef = React.useRef(0);
+
+  const pushToolActivity = React.useCallback((label: string) => {
+    const activity = parseToolActivity(label);
+    const id = ++toolActivityIdRef.current;
+    if (activity.done) {
+      setToolActivities((prev) => {
+        const updated = [...prev];
+        for (let i = updated.length - 1; i >= 0; i--) {
+          if (updated[i]!.name === activity.name && !updated[i]!.done) {
+            updated[i] = { ...updated[i]!, done: true, elapsed: activity.elapsed, result: activity.result };
+            return updated;
+          }
+        }
+        return [...prev.slice(-4), { id, ...activity }];
+      });
+    } else {
+      setToolActivities((prev) => [...prev.slice(-4), { id, ...activity }]);
+    }
+  }, []);
   const [verifyPanel, setVerifyPanel] = useState<"off" | "menu" | "providers" | "models" | "effort">("off");
   const [verifyLogView, setVerifyLogView] = useState<"history" | "sections" | "detail" | null>(null);
   const [verifyLogRunIndex, setVerifyLogRunIndex] = useState(0);
@@ -2032,7 +2102,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
         try {
           const auto = new AutoAgent(
             options.cwd,
-            (prompt) => agent.runTurn(prompt),
+            (prompt, onChunk, onStatus) => agent.runTurn(prompt, onChunk, onStatus),
             (step) => {
               const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
               const label = `${icon} ${step.description}${step.ms ? ` (${(step.ms / 1000).toFixed(1)}s)` : ""}`;
@@ -2043,11 +2113,14 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               setThinkMsg(`${icon} ${step.description}`);
             },
           );
+          auto.setChunkCallback((chunk) => setAiChunkText(chunk));
           auto.setToolStatusCallback((status) => {
             if (!status.startsWith("tool: ")) return;
             const label = status.slice(6);
             const logType = /\(\d+\.\d+s\)/.test(label.split("\n")[0] ?? "") ? "tool-result" : "tool-call";
             agent.activityLog.log(autoActivityId, logType, label);
+            setAiChunkText("");
+            pushToolActivity(label);
           });
 
           const result = await auto.run(autoGoal);
@@ -2205,6 +2278,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
       if (!skipRender) setEntries((c) => [...c, { role: "user", text: line }]);
       busyRef.current = true;
       setIsBusy(true);
+      setToolActivities([]);
+      setAiChunkText("");
 
       try {
         // Inject completed spawn results into the prompt
@@ -2273,7 +2348,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const renderAutoLines = () => setStreamingText(autoLines.map((l) => l.startsWith("  ") ? l : `● ${l}`).join("\n") + "\n");
           const auto = new AutoAgent(
             options.cwd,
-            (p, onStatus) => agent.runTurn(p, undefined, onStatus),
+            (p, onChunk, onStatus) => agent.runTurn(p, onChunk, onStatus),
             (step) => {
               const icon = step.status === "running" ? "◉" : step.status === "success" ? "✓" : "✗";
               const elapsed = step.ms ? ` (${(step.ms / 1000).toFixed(1)}s)` : "";
@@ -2298,13 +2373,15 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               renderAutoLines();
             },
           );
+          auto.setChunkCallback((chunk) => { setAiChunkText(chunk); });
           auto.setToolStatusCallback((status) => {
             if (status.startsWith("tool: ")) {
               const label = status.slice(6);
               const firstLine = label.split("\n")[0];
               const logType = /\(\d+\.\d+s\)/.test(firstLine ?? "") ? "tool-result" : "tool-call";
               agent.activityLog.log(autoActivityId, logType, label);
-              setThinkMsg(firstLine);
+              setAiChunkText("");
+              pushToolActivity(label);
               if (/\(\d+\.\d+s\)/.test(firstLine)) {
                 // Completed tool — update last nested tool line
                 for (let i = autoLines.length - 1; i >= 0; i--) {
@@ -2371,9 +2448,8 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           const pipeToolStatus = (status: string) => {
             if (status.startsWith("tool: ")) {
               const label = status.slice(6);
-              const firstLine = label.split("\n")[0];
-              setThinkMsg(firstLine);
-              if (/\(\d+\.\d+s\)/.test(firstLine)) {
+              pushToolActivity(label);
+              if (/\(\d+\.\d+s\)/.test(label.split("\n")[0])) {
                 for (let i = pipeLines.length - 1; i >= 0; i--) {
                   if (pipeLines[i].startsWith("  ● ")) { pipeLines[i] = `  ● ${label}`; break; }
                 }
@@ -2408,7 +2484,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             const result = await agent.runTurn(fullPrompt, undefined, (status) => {
               if (status.startsWith("tool: ")) {
                 const label = status.slice(6);
-                setThinkMsg(label.split("\n")[0]);
+                pushToolActivity(label);
                 if (/\(\d+\.\d+s\)/.test(label.split("\n")[0])) {
                   for (let i = skillLines.length - 1; i >= 0; i--) {
                     if (skillLines[i].startsWith("  ● ")) { skillLines[i] = `  ● ${label}`; break; }
@@ -2439,7 +2515,7 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
           agent.getTeam().setToolStatusCallback((status) => {
             if (status.startsWith("tool: ")) {
               const label = status.slice(6);
-              setThinkMsg(label.split("\n")[0]);
+              pushToolActivity(label);
               if (/\(\d+\.\d+s\)/.test(label.split("\n")[0])) {
                 for (let i = teamLines.length - 1; i >= 0; i--) {
                   if (teamLines[i].startsWith("  ● ")) { teamLines[i] = `  ● ${label}`; break; }
@@ -2485,11 +2561,10 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
               });
             },
             (status) => {
-              const firstLine = status.split("\n")[0];
-              setThinkMsg(firstLine);
               if (status.startsWith("tool: ")) {
                 const full = status.slice(6);
-                const label = firstLine.slice(6);
+                const label = full.split("\n")[0];
+                pushToolActivity(full);
                 // Status with timing = completed tool; update last entry with result info
                 if (/\(\d+\.\d+s\)/.test(label)) {
                   const resultPart = full.includes("\n") ? "\n" + full.split("\n").slice(1).join("\n") : "";
@@ -2608,7 +2683,33 @@ function App({ agent, options }: { agent: CodingAgent; options: StartReplOptions
             <Text color="#ff9c73" bold>{"=^.^= "}</Text>
             <Text color="gray" italic>{thinkMsg}</Text>
           </Box>
-          {streamingText ? (
+          {toolActivities.length > 0 && (
+            <Box flexDirection="column" marginLeft={2} marginTop={0}>
+              {toolActivities.map((act) => {
+                const color = act.done ? "gray" : getToolColor(act.name);
+                const icon = act.done ? "✓" : "◉";
+                const name = act.name.padEnd(7);
+                const detail = act.detail.length > 55 ? `…${act.detail.slice(-54)}` : act.detail;
+                const suffix = act.done
+                  ? ` ${act.elapsed ?? ""}${act.result ? `  ⎿  ${act.result}` : ""}`.trimEnd()
+                  : "";
+                return (
+                  <Box key={act.id}>
+                    <Text color={color} bold={!act.done}>{`${icon} `}</Text>
+                    <Text color={color} bold={!act.done}>{name}</Text>
+                    <Text color={act.done ? "gray" : "white"}>{detail}</Text>
+                    {suffix ? <Text color="gray">{suffix}</Text> : null}
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
+          {aiChunkText ? (
+            <Box marginLeft={2} marginTop={0}>
+              <Text color="#ffe0cc" wrap="wrap">{aiChunkText.split("\n").slice(-3).join("\n")}</Text>
+            </Box>
+          ) : null}
+          {streamingText && !toolActivities.length ? (
             <Box marginLeft={2} flexDirection="column">
               <Text color="#ffe0cc" wrap="wrap">{streamingText}</Text>
             </Box>
