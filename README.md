@@ -11,6 +11,7 @@
 <table>
 <tr><td><b>Multi-provider, zero lock-in</b></td><td>Anthropic (Claude), Codex (ChatGPT subscription), Ollama (local/free), and vLLM/OpenAI-compatible endpoints — all available behind one CLI. Rate limit on Claude? Auto-switches to Codex. Need self-hosted inference? Point Paw at your vLLM server.</td></tr>
 <tr><td><b>Problem Classifier</b></td><td>Every prompt is instantly classified into a category (security, debugging, architecture, performance, testing, data, API, web, DevOps, refactoring, explanation). The right features activate automatically — no flags needed.</td></tr>
+<tr><td><b>Live Activity Display</b></td><td>Every tool call shown in real time: color-coded icons (Read=cyan, Write=yellow, Bash=magenta, Search=blue), elapsed time, result summary. AI intermediate responses stream live between tool calls so you always see what the agent is doing.</td></tr>
 <tr><td><b>Cross-session skill learning</b></td><td>Successful auto-agent tasks are recorded across sessions. Repeated patterns auto-generate reusable skills. Bad patterns self-correct via confidence decay. Fully under user control via <code>/memory</code>.</td></tr>
 <tr><td><b>Parallel sub-agents</b></td><td>Spawn independent agents that work in background while you keep chatting. Each spawned agent inherits your current model and session context.</td></tr>
 <tr><td><b>Cross-provider verification</b></td><td>AI writes code → a <i>different</i> AI reviews it automatically. Paw also runs local checks (typecheck/build/test/lint when available), summarizes blockers inline, and keeps browsable verification logs across sessions.</td></tr>
@@ -93,6 +94,40 @@ VLLM_API_KEY=dummy
 
 ---
 
+## Live Activity Display
+
+Every tool call and AI response is shown in real time while the agent works:
+
+```
+=^.^= ◉ Executing step 2/5
+
+  ✓ Read     src/cli.tsx             0.3s  ⎿  245 lines
+  ✓ Search   "thinkMsg"              0.1s  ⎿  8 results
+  ✓ Bash     npm run build           1.2s
+  ◉ Write    src/output.ts
+
+  I'll now update the render section to add the new...
+```
+
+| Icon | Meaning |
+|------|---------|
+| `◉` | Tool running / step in progress |
+| `✓` | Tool completed (elapsed time + result shown) |
+
+Tool colors:
+
+| Color | Tools |
+|-------|-------|
+| Cyan | `Read`, `List` |
+| Yellow | `Write`, `Update` |
+| Magenta | `Bash` |
+| Blue | `Search`, `Glob` |
+| Green | `Fetch` |
+
+AI intermediate responses stream between tool calls so you see reasoning as it happens, not just the final answer.
+
+---
+
 ## Agent Modes
 
 ### Solo (default)
@@ -123,6 +158,10 @@ Self-driving agent: analyze → plan → execute → verify → fix, until done.
 ◉ Analyzing project...
 ✓ Creating plan...
 ◉ Executing step 1/10...
+  ✓ Read    src/api/auth.ts         0.2s
+  ✓ Search  "validate"              0.1s  ⎿  3 results
+  ◉ Write   src/api/auth.ts
+
 ◉ Verifying...
 ✗ Build error found
 ◉ Fixing errors...
@@ -206,12 +245,12 @@ Every learned task carries a **confidence score** (0–1) that self-corrects:
 
 Only patterns with confidence ≥ 0.4 are injected as context.
 
-### Control via `/memory`
+### User control — all via `/memory`
 
-Learning is integrated into `/memory` alongside PAW.md:
+Learning is integrated into the existing `/memory` command alongside PAW.md:
 
 ```bash
-/memory              # PAW.md sources + learned summary + current mode
+/memory              # PAW.md sources + learned pattern summary + current mode
 /memory auto         # learn silently, create skills automatically (default)
 /memory ask          # learn silently, ask before creating skills
 /memory off          # disable learning and context injection entirely
@@ -387,7 +426,8 @@ Interactive manager via `/mcp`. Supports stdio, HTTP, SSE. Tools auto-injected i
 | `/verify` | Cross-provider verification settings |
 | `/verify logs` | Browse verification history |
 | `/safety` | Safety guard configuration |
-| `/memory` | PAW.md + learned patterns + learning control |
+| `/memory` | PAW.md + learned patterns + learning mode (auto\|ask\|off\|forget) |
+| `/memory yes\|no` | Confirm/skip pending auto-skill creation (ask mode) |
 | `/remember <note>` | Save note to memory |
 | `/sessions` | List sessions + current ID |
 | `/sessions <query>` | Search & summarize past sessions |
