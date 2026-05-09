@@ -197,7 +197,7 @@ describe("HookManager", () => {
       // Use a command that reads stdin and echoes a field
       await createSettings(path.join(tmpDir, ".paw"), {
         "pre-tool": [
-          { hooks: [{ type: "command", command: "cat | jq -r '.tool_name // empty'" }] },
+          { hooks: [{ type: "command", command: `node -e 'const d=require("fs").readFileSync(0,"utf8");console.log(JSON.parse(d).tool_name||"")'` }] },
         ],
       });
 
